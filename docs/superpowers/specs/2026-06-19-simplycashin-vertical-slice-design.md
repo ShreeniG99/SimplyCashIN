@@ -59,6 +59,27 @@ Anything outside M1 is abstracted behind an interface in M1 (a `Channel`
 protocol, an `LLM` client, a `Clock`) so later milestones swap implementations
 without touching the core.
 
+### Differentiators vs Peakflo (deferred — not in M1)
+
+Researched and intentionally kept out of the lean M1 slice; scheduled for later
+milestones. The M1 architecture leaves clean seams for each.
+
+- **A — Regional-language, tone-aware messaging** (Tamil/Hindi/Hinglish/Tanglish):
+  a per-buyer `language` fed to the Conversation agent's system prompt. Peakflo
+  and generic tools are English-centric; this drives WhatsApp response rates for
+  Tier-2/3 buyers. *Target: M3 (with channels) or earlier.*
+- **B — Statutory escalation ladder + MSME Samadhaan draft:** named escalation
+  rungs that cite **Section 43B(h)** (a buyer loses the income-tax deduction on
+  amounts unpaid to a registered micro/small supplier beyond 45 days) and
+  **Section 16, MSMED Act** (interest at 3× the RBI bank rate); the top rung
+  auto-drafts an **MSME Samadhaan** complaint (MSEFC, 90-day adjudication).
+  Firm-but-never-threatening, and uniquely Indian — generic tools don't do this.
+  *Target: M2/M3 (extends the escalation path + a draft-generation Claude call).*
+- **D — Working-capital bridge nudge:** when cash is tight and an invoice is
+  badly overdue, suggest an early-pay discount or flag the receivable as
+  financeable (e.g. TReDS / invoice discounting). The real MSME pain is capital,
+  not just reminders. Needs financing-partner data. *Target: M5+ (stretch).*
+
 ## Goals (M1)
 
 - A complete, runnable decision loop for a single overdue invoice.
