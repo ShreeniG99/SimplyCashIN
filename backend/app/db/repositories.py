@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import models as m
 from app.domain.enums import CashEventStatus, Direction, InvoiceStatus
 from app.domain.models import (
-    Buyer, CashEvent, ConversationTurn, Invoice, Owner, Policy,
+    Buyer, CashEvent, ConversationTurn, Escalation, Invoice, Owner, Policy,
 )
 
 
@@ -94,3 +94,26 @@ class CashEventRepo:
                          due_date=row.due_date, counterparty=row.counterparty,
                          amount_paise=row.amount_paise, label=row.label,
                          status=CashEventStatus(row.status))
+
+
+class EscalationRepo:
+    def __init__(self, session: AsyncSession):
+        self.s = session
+
+    async def save(self, esc: Escalation, *, draft_text: str | None,
+                   channel_kind: str | None) -> None:
+        self.s.add(m.EscalationRow(
+            id=esc.id, buyer_id=esc.buyer_id, amount_paise=esc.amount_paise,
+            reason=esc.reason, recommendation=esc.recommendation,
+            draft_text=draft_text, channel_kind=channel_kind, resolved=False))
+
+    async def get(self, esc_id: str) -> m.EscalationRow:
+        return (await self.s.execute(
+            select(m.EscalationRow).where(m.EscalationRow.id == esc_id))).scalar_one()
+
+    async def resolve(self, esc_id: str, resolution: str) -> m.EscalationRow:
+        row = await self.get(esc_id)
+        row.resolved = True
+        row.resolution = resolution
+        await self.s.commit()
+        return row
