@@ -32,7 +32,14 @@ sequenced milestones.
 - **Location:** a new `backend/` directory in this repository. A real frontend
   app is a later milestone; M1's API matches the existing `WFDATA` shapes so
   wiring is trivial.
-- **M1 datastore:** PostgreSQL + ChromaDB via `docker-compose`.
+- **M1 datastore:** PostgreSQL **with the `pgvector` extension** (structured
+  rows *and* vectors in one store) via `docker-compose`. Supabase is the managed
+  Postgres target — local dev uses the `pgvector/pgvector` image so the schema is
+  Supabase-compatible.
+- **Auth:** Supabase Auth (issues JWTs) instead of Firebase — keeps Postgres,
+  auth, and (later) realtime in one provider. Lands in M4.
+- **Observability:** PostHog LLM analytics traces every agent call and decision
+  (the verification-loop tooling). Wired as a thin, swappable tracer from M1.
 - **API key:** real Claude calls (key read from `ANTHROPIC_API_KEY`); a
   deterministic stub LLM is used in tests.
 
@@ -42,10 +49,10 @@ Each milestone is its own spec → plan → build cycle.
 
 | # | Milestone | Delivers |
 |---|---|---|
-| **M1** | Vertical slice — agent brain + thin API (**this spec**) | One buyer end-to-end: ingest → Context → Conversation → Negotiation → Orchestrator act/escalate → simulated dispatch → Memory. Postgres, Chroma, Anthropic client, policy engine, cash-calendar service, FastAPI endpoints. |
+| **M1** | Vertical slice — agent brain + thin API (**this spec**) | One buyer end-to-end: ingest → Context → Conversation → Negotiation → Orchestrator act/escalate → simulated dispatch → Memory. Postgres+pgvector, Anthropic client, PostHog tracer, policy engine, cash-calendar service, FastAPI endpoints. |
 | M2 | Ingestion & scheduling | CSV + WhatsApp-export connectors, APScheduler daily overdue trigger, Redis urgency sorted-set, vectorization pipeline. |
 | M3 | Channels & dispatch | Celery+Redis async dispatch with retry, Twilio WhatsApp/SMS, aiosmtplib email, inbound reply webhooks. |
-| M4 | Auth & multi-tenancy | Firebase Auth + JWT, per-owner data + vector-namespace sandboxing. |
+| M4 | Auth & multi-tenancy | Supabase Auth + JWT, per-owner data + vector-namespace sandboxing (Postgres RLS). |
 | M5 | Realtime HITL + frontend | WebSocket HITL gateway (approve/edit/override before send); real React app consuming the API. |
 
 Anything outside M1 is abstracted behind an interface in M1 (a `Channel`
@@ -91,7 +98,7 @@ backend/
       anthropic_client.py  # claude-opus-4-8, adaptive thinking, structured outputs
       stub.py          # deterministic stub for tests / no-key runtime
     retrieval/
-      chroma_client.py # vector store wrapper (per-buyer namespace)
+      vector_store.py  # pgvector wrapper: embed + similarity search (per-buyer namespace column)
     agents/
       context.py       # ContextAgent → BuyerContext (vector + structured lookup)
       conversation.py  # ConversationAgent → tone-aware draft (text)
@@ -104,11 +111,13 @@ backend/
     channels/
       base.py          # Channel protocol
       simulated.py     # SimulatedChannel (records "sent", no external call)
+    obs/
+      tracer.py        # Tracer protocol + PostHogTracer + NullTracer
     api/
       app.py           # FastAPI app factory
       routes.py        # endpoints
   tests/
-  docker-compose.yml   # postgres + chroma
+  docker-compose.yml   # postgres + pgvector (single service)
   pyproject.toml
   .env.example
   README.md
@@ -124,9 +133,9 @@ Each unit has one purpose, a defined interface, and is testable in isolation.
   but its inputs. The single seam through which all Claude calls flow.
 - **`ContextAgent`** — input: buyer id + invoice; output: `BuyerContext`
   (tier, on-time rate, days overdue, channel, best past approach). Hybrid
-  retrieval: structured invoice/buyer lookup from Postgres + vector search over
-  prior conversation/outcome snippets in Chroma. Depends on repositories +
-  `ChromaClient`. No LLM call.
+  retrieval: structured invoice/buyer lookup from Postgres + `pgvector`
+  similarity search over prior conversation/outcome snippets (same database).
+  Depends on repositories + `VectorStore`. No LLM call.
 - **`CashCalendarService`** — input: the owner's `CashEvent` rows for the
   period; output: `urgency` in [0,1] plus the breaching cash need (e.g. "₹1.2L
   due Monday"). Pure function over structured data. No LLM call. A `CashEvent`
@@ -151,7 +160,13 @@ Each unit has one purpose, a defined interface, and is testable in isolation.
   week, relationship tier. This is what makes ACT/ESCALATE auditable.
 - **`MemoryService`** — `record_outcome(buyer, tone, plan, timing, paid)` and
   `best_approach(buyer)`. Writes structured rows to Postgres and embeds a
-  summary snippet into Chroma for the ContextAgent to retrieve next time.
+  summary snippet into the `pgvector` table for the ContextAgent to retrieve
+  next time.
+- **`Tracer` protocol** — `trace(agent, model, prompt, response, decision, ...)`.
+  Implemented by `PostHogTracer` (LLM analytics) and a no-op `NullTracer` (tests
+  / no key). Every agent call and the final ACT/ESCALATE decision are traced, so
+  the owner-facing verification loop has an audit trail. Swappable; off by
+  default when `POSTHOG_API_KEY` is unset.
 - **`Channel` protocol** — `send(buyer, message, channel_kind) -> DispatchResult`.
   `SimulatedChannel` records the send and returns success without an external
   call. M3 adds Twilio/SMTP implementations.
@@ -216,9 +231,10 @@ Matching the `WFDATA` field shapes keeps M5's frontend wiring to a thin mapping.
 `payment_installment`, `escalation`, `memory_record`, `cash_event`. Async
 SQLAlchemy + Alembic. `db/seed.py` loads the Ramesh Iyer / Sri Vinayaga Motors
 fixture from `ui_kits/wireframes/data.js` (Anand Motors et al.) so the slice
-demos against the exact scenario the wireframes show. Chroma stores per-buyer
-conversation/outcome embeddings in a namespace keyed by buyer id (forward-
-compatible with M4's per-owner sandboxing).
+demos against the exact scenario the wireframes show. A `memory_embedding` table
+(pgvector) stores per-buyer conversation/outcome embeddings with a `buyer_id`
+(and later `owner_id`) column as the namespace — forward-compatible with M4's
+per-owner sandboxing via Postgres row-level security.
 
 ### Cash Calendar UI (forward spec for M5; data model lands in M1)
 
@@ -250,7 +266,7 @@ This design was checked against an external benchmark and two reasoning frames.
 The findings below are folded into the plan; none invalidate the architecture.
 
 **Peakflo benchmark.** Peakflo's public product API is **REST + JWT** with
-ISO-8601/ISO-4217 conventions — our FastAPI + JWT (Firebase-issued) choice
+ISO-8601/ISO-4217 conventions — our FastAPI + JWT (Supabase-issued) choice
 matches. Peakflo's public agent repo (`peakflo/20x`) is built on **Anthropic
 Claude + the Claude Agent SDK**, validating Claude as the model choice, though
 that repo is a TypeScript/Electron desktop tool — not a reference for our Python
@@ -282,9 +298,9 @@ copy of theirs.
   closing the loop.
 
 **Stack notes (non-blocking, revisit in later milestones):**
-- *Vector store:* ChromaDB is fine and is in the PDF. `pgvector` (vectors inside
-  Postgres) is a lighter-ops alternative — one fewer service. Keep Chroma for
-  M1; reconsider at M2.
+- *Vector store:* **decided — `pgvector` inside Postgres**, not a separate
+  ChromaDB service (one fewer container; Supabase-compatible). The PDF named
+  Chroma; this is a deliberate, justified deviation.
 - *Scheduler vs queue overlap:* APScheduler (in-process trigger) + Celery
   (distributed dispatch) overlap in responsibility. The PDF's split (APScheduler
   detects overdue → Celery dispatches) is reasonable; just don't duplicate the
@@ -301,7 +317,9 @@ copy of theirs.
   silently drop) with reason "agent could not complete — needs your attention".
 - A `NegotiationAgent` plan that fails schema validation → escalate.
 - Channel send failure → escalate, record the failure.
-- DB/Chroma connection errors fail fast at startup (docker-compose dependency).
+- DB connection errors fail fast at startup (docker-compose dependency).
+- Tracing failures (PostHog) are swallowed — observability must never break a
+  collections cycle.
 - Refusal handling: if Claude returns `stop_reason == "refusal"`, treat as
   escalation; do not read `content` blindly.
 
@@ -316,9 +334,10 @@ TDD. The `LLM` and `Channel` seams make the core deterministic.
 - **Integration (marked, opt-in):** one real `claude-opus-4-8` call each for
   Conversation (tone scales with overdue-ness) and Negotiation (returns a
   schema-valid plan within policy bounds).
-- `docker-compose` brings up Postgres + Chroma for the DB-touching tests.
+- `docker-compose` brings up Postgres+pgvector for the DB-touching tests. The
+  `Tracer` defaults to `NullTracer` in tests.
 
 ## Open questions
 
-None blocking. Resolved during brainstorming: datastore (Postgres+Chroma),
+None blocking. Resolved during brainstorming: datastore (Postgres+pgvector),
 LLM (real Claude), location (`backend/`), sequencing (vertical slice).
