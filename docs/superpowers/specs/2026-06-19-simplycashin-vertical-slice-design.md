@@ -79,7 +79,7 @@ backend/
     config.py          # settings from env (ANTHROPIC_API_KEY, DB urls, USE_STUB_LLM)
     domain/            # Pydantic models: Owner, Buyer, Invoice, ConversationTurn,
                        #   PaymentPlan, PaymentInstallment, Escalation, PolicyCheck,
-                       #   BuyerContext, CashCalendar, CashDay, MemoryRecord, CycleResult
+                       #   BuyerContext, CashCalendar, CashEvent, MemoryRecord, CycleResult
     db/
       models.py        # SQLAlchemy async ORM models
       repositories.py  # data access (buyers, invoices, conversations, memory, escalations)
@@ -127,9 +127,16 @@ Each unit has one purpose, a defined interface, and is testable in isolation.
   retrieval: structured invoice/buyer lookup from Postgres + vector search over
   prior conversation/outcome snippets in Chroma. Depends on repositories +
   `ChromaClient`. No LLM call.
-- **`CashCalendarService`** — input: owner's week of `CashDay` rows; output:
-  `urgency` in [0,1] plus the breaching cash need (e.g. "₹1.2L due Monday").
-  Pure function over structured data. No LLM call.
+- **`CashCalendarService`** — input: the owner's `CashEvent` rows for the
+  period; output: `urgency` in [0,1] plus the breaching cash need (e.g. "₹1.2L
+  due Monday"). Pure function over structured data. No LLM call. A `CashEvent`
+  has a `direction` (`in` = a buyer's payment due to the owner; `out` = the
+  owner's obligation to a supplier / wages / GST), `due_date`, `counterparty`,
+  `amount`, `label`, and `status` (`pending` | `done`). Urgency rises with the
+  size and nearness of **out** events in the current week relative to expected
+  **in** events — i.e. how badly the owner needs cash now. This urgency feeds
+  the Conversation and Negotiation agents (firmer when the owner's own
+  obligations are pressing).
 - **`ConversationAgent`** — input: `BuyerContext` + `urgency` + thread; output:
   a buyer-facing message string. One `claude-opus-4-8` text call. System prompt
   encodes the brand voice (warm, relationship-first, respectful Indian-English;
@@ -192,7 +199,11 @@ For one overdue invoice belonging to the single M1 owner:
   status, tone, agent, action, escalated).
 - `GET /buyers/{buyer_id}` → buyer detail in the `WFDATA.buyerContext` + `thread`
   + `plan` shapes.
-- `GET /cash-calendar` → `WFDATA.cashCalendar` shape.
+- `GET /cash-calendar` → per-day aggregation for the calendar grid (each day:
+  count of `in` events and count of `out` events → dot counts by colour) plus
+  the current week's `CashEvent` list for the checklist below the grid.
+- `POST /cash-events/{id}/toggle` → mark a cash event `done`/`pending` (strikes
+  it through in the checklist and recomputes urgency).
 - `POST /escalations/{id}/resolve` → body `{action: approve|edit|override, ...}`;
   the human-in-the-loop seam. In-process for M1; M5 makes it realtime over
   WebSocket. On approve → dispatch + memory; on override → record owner choice.
@@ -202,12 +213,86 @@ Matching the `WFDATA` field shapes keeps M5's frontend wiring to a thin mapping.
 ### Data model (Postgres)
 
 `owner`, `buyer`, `invoice`, `conversation_turn`, `payment_plan`,
-`payment_installment`, `escalation`, `memory_record`, `cash_day`. Async
+`payment_installment`, `escalation`, `memory_record`, `cash_event`. Async
 SQLAlchemy + Alembic. `db/seed.py` loads the Ramesh Iyer / Sri Vinayaga Motors
 fixture from `ui_kits/wireframes/data.js` (Anand Motors et al.) so the slice
 demos against the exact scenario the wireframes show. Chroma stores per-buyer
 conversation/outcome embeddings in a namespace keyed by buyer id (forward-
 compatible with M4's per-owner sandboxing).
+
+### Cash Calendar UI (forward spec for M5; data model lands in M1)
+
+The Cash Calendar is a month-grid calendar with **per-day dots**:
+
+- **Blue dots (azure, `--azure-300`)** — `in` events: payments due to the owner
+  from buyers on that day. One dot per buyer due that day (many buyers → many
+  dots).
+- **Red dots (status danger, `--status-overdue`)** — `out` events: the owner's
+  own payment deadlines (suppliers, wages, GST). One dot per obligation.
+
+Below the grid sits a **to-do list of the selected/current week's `CashEvent`s**
+— each row shows the date chip, label, counterparty, amount, and direction
+colour. Marking one done (`POST /cash-events/{id}/toggle`) **strikes it through**
+and recomputes the owner's cash urgency. This is the owner's at-a-glance answer
+to "how badly do I need cash this week", which is exactly the signal that drives
+how firmly the agents push buyers.
+
+> **Brand-colour note:** the design-system readme proposes status colours
+> (green=paid, amber=due-soon, red=overdue, azure=agent). This calendar
+> deliberately maps **in → azure** and **out → red**, which stays on-brand
+> (azure is the hero accent; red is the danger token) and overrides the older
+> `inPip`/`outPip` mono treatment in `WFDATA.cashCalendar`. The M1 `cash_event`
+> model carries everything the UI needs; the grid component is built in M5.
+
+## Plan validation (Peakflo benchmark · Karpathy's principles · OODA)
+
+This design was checked against an external benchmark and two reasoning frames.
+The findings below are folded into the plan; none invalidate the architecture.
+
+**Peakflo benchmark.** Peakflo's public product API is **REST + JWT** with
+ISO-8601/ISO-4217 conventions — our FastAPI + JWT (Firebase-issued) choice
+matches. Peakflo's public agent repo (`peakflo/20x`) is built on **Anthropic
+Claude + the Claude Agent SDK**, validating Claude as the model choice, though
+that repo is a TypeScript/Electron desktop tool — not a reference for our Python
+receivables backend. Our stack is an independently standard Python choice, not a
+copy of theirs.
+
+**Karpathy's principles → design refinements.**
+- *Autonomy slider (not binary autonomy):* the owner's `Policy` becomes an
+  explicit **autonomy level** the owner controls — e.g. `auto_send_within_policy`
+  / `review_above_amount(₹X)` / `always_review` — rather than a single
+  ACT-vs-ESCALATE rule. The policy guardrails ARE the slider's mechanism.
+- *Fast generation-verification loop:* the HITL escalation screen is the
+  verification surface. Every escalation must render the draft/plan, the policy
+  checks, and a one-click approve/edit/override — optimised for fast human
+  review (Karpathy's "make verification easy and fast").
+- *Partial autonomy / "works.all()":* vertical-slice-first plus deterministic
+  ACT/ESCALATE keeps the system honest; agents never send on a policy breach.
+- *Build for agents, not just humans:* expose an `llms.txt` and keep the API
+  agent-readable (forward-looking; an MCP surface is a possible later milestone
+  so other agents can consume SimplyCashIN).
+
+**OODA mapping (the loop is a Boyd OODA loop):**
+- **Observe** — Context agent (buyer history + invoice) + Cash Calendar (owner
+  cash position).
+- **Orient** — Memory (what worked before) + Policy + urgency frame the
+  situation.
+- **Decide** — Orchestrator chooses ACT vs ESCALATE (deterministic).
+- **Act** — Channel dispatch, or escalate to the owner; outcome feeds Memory,
+  closing the loop.
+
+**Stack notes (non-blocking, revisit in later milestones):**
+- *Vector store:* ChromaDB is fine and is in the PDF. `pgvector` (vectors inside
+  Postgres) is a lighter-ops alternative — one fewer service. Keep Chroma for
+  M1; reconsider at M2.
+- *Scheduler vs queue overlap:* APScheduler (in-process trigger) + Celery
+  (distributed dispatch) overlap in responsibility. The PDF's split (APScheduler
+  detects overdue → Celery dispatches) is reasonable; just don't duplicate the
+  same job in both. Decided in M2/M3.
+- *Orchestration framework:* keep the **hand-rolled orchestrator** (workflow
+  tier) for M1 — deterministic, auditable, and aligned with Anthropic's
+  guidance. LangGraph is only worth adopting if cyclic multi-turn negotiation
+  state grows complex; it adds abstraction and LangChain coupling otherwise.
 
 ## Error handling
 
