@@ -63,3 +63,29 @@ class CashCalendarOut(BaseModel):
 class ResolveIn(BaseModel):
     action: str            # "approve" | "edit" | "override"
     text: str | None = None
+
+
+class ThreadTurnOut(BaseModel):
+    sender: str
+    agent: str | None
+    text: str
+    created_at: str
+
+
+class InvoiceOut(BaseModel):
+    number: str
+    amount: str
+    amount_paise: int
+    overdue: int
+    status: str
+
+
+class BuyerDetailOut(BaseModel):
+    id: str
+    name: str
+    tier: str
+    preferred_channel: str
+    on_time_rate: float
+    invoice: InvoiceOut
+    thread: list[ThreadTurnOut]
+    best_approach: str | None

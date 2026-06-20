@@ -32,6 +32,32 @@ async def list_buyers(session: AsyncSession = Depends(get_session)):
     return out
 
 
+@router.get("/buyers/{buyer_id}", response_model=schemas.BuyerDetailOut)
+async def buyer_detail(buyer_id: str, session: AsyncSession = Depends(get_session)):
+    from app.retrieval.embedder import StubEmbedder
+    from app.retrieval.vector_store import PgVectorStore
+    try:
+        buyer = await BuyerRepo(session).get(buyer_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="buyer not found")
+    invoice = await InvoiceRepo(session).latest_for_buyer(buyer_id)
+    thread = await ConversationRepo(session).thread_for_buyer(buyer_id)
+    snippets = await PgVectorStore(session, StubEmbedder()).search(
+        buyer_id, "what worked best", k=1)
+    return schemas.BuyerDetailOut(
+        id=buyer.id, name=buyer.name, tier=buyer.tier,
+        preferred_channel=buyer.preferred_channel, on_time_rate=buyer.on_time_rate,
+        invoice=schemas.InvoiceOut(
+            number=invoice.number, amount=format_inr(invoice.amount_paise),
+            amount_paise=invoice.amount_paise, overdue=invoice.days_overdue,
+            status=invoice.status.value),
+        thread=[schemas.ThreadTurnOut(sender=t.sender, agent=t.agent, text=t.text,
+                                      created_at=t.created_at.isoformat())
+                for t in thread],
+        best_approach=snippets[0] if snippets else None,
+    )
+
+
 @router.post("/buyers/{buyer_id}/run-cycle", response_model=schemas.CycleOut)
 async def run_cycle(buyer_id: str, session: AsyncSession = Depends(get_session),
                     orchestrator: Orchestrator = Depends(get_orchestrator)):
