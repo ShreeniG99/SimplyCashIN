@@ -1,8 +1,7 @@
-.env
 .venv/
 __pycache__/
-*.pyc
 .pytest_cache/
 *.egg-info/
-
-.vercel
+tests/
+.env
+docker-compose.yml

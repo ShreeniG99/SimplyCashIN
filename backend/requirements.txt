@@ -1,0 +1,8 @@
+fastapi>=0.115
+sqlalchemy[asyncio]>=2.0.30
+asyncpg>=0.29
+pgvector>=0.3
+pydantic>=2.7
+pydantic-settings>=2.3
+anthropic>=0.69
+posthog>=3.5
