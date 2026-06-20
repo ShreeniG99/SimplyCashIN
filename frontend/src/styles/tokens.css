@@ -1,0 +1,44 @@
+/* SimplyCashIN design tokens — consolidated from the DS (tokens/*.css) */
+:root {
+  /* Azure (brand primary) */
+  --azure-50:#f1fbfc; --azure-100:#ddf6f9; --azure-200:#c0eef3; --azure-300:#9ae5ee;
+  --azure-400:#6bd3df; --azure-500:#3fb6c4; --azure-600:#2a8d99; --azure-700:#226f78; --azure-800:#1b545b;
+
+  /* Grey azure (cool neutrals) */
+  --ink:#0d1214; --grey-800:#2a3a3d; --grey-700:#3f5457; --grey-600:#5f7478; --grey-500:#7e989c;
+  --grey-400:#9bb0b3; --grey-300:#c2d0d2; --grey-200:#dde6e7; --grey-100:#eef3f3; --grey-50:#f7fafa; --white:#fff;
+
+  /* Semantic status */
+  --success-fg:#1f8a6d; --success:#56c2a0; --success-soft:#e0f5ee;
+  --warning-fg:#a9711a; --warning:#e8b04b; --warning-soft:#fbf0d8;
+  --danger-fg:#b14a3f;  --danger:#e07a6f;  --danger-soft:#fae3e0;
+
+  /* Surfaces */
+  --bg-page:var(--grey-50); --surface-card:var(--white); --surface-sunken:var(--grey-100); --surface-inverse:var(--ink);
+  /* Text */
+  --text-strong:var(--ink); --text-body:var(--grey-700); --text-muted:var(--grey-500); --text-faint:var(--grey-400);
+  /* Borders */
+  --border-subtle:var(--grey-200); --border-default:var(--grey-300); --border-strong:var(--grey-400); --border-focus:var(--azure-500);
+  /* Accent */
+  --accent:var(--azure-300); --accent-hover:var(--azure-400); --accent-press:var(--azure-500); --accent-soft:var(--azure-100);
+  --accent-ring:color-mix(in srgb, var(--azure-500) 35%, transparent); --on-accent:var(--ink);
+  --wire-fill:var(--grey-100); --wire-fill-2:var(--grey-200);
+
+  /* Type */
+  --font-heading:"Montserrat", system-ui, sans-serif;
+  --font-body:"Hanken Grotesk", system-ui, -apple-system, sans-serif;
+  --font-mono:ui-monospace, Menlo, Consolas, monospace;
+
+  /* Radii */
+  --radius-xs:6px; --radius-sm:10px; --radius-md:14px; --radius-lg:20px; --radius-xl:28px; --radius-pill:999px;
+  /* Shadows */
+  --shadow-xs:0 1px 2px rgba(20,32,31,.06); --shadow-sm:0 2px 6px rgba(20,32,31,.07);
+  --shadow-md:0 6px 18px rgba(20,32,31,.09); --shadow-lg:0 16px 40px rgba(20,32,31,.12);
+  --shadow-accent:0 8px 22px color-mix(in srgb, var(--azure-500) 32%, transparent);
+  --ring-focus:0 0 0 3px var(--accent-ring);
+  /* Motion */
+  --ease-standard:cubic-bezier(.22,.61,.36,1); --ease-emphasis:cubic-bezier(.34,1.56,.64,1);
+  --dur-fast:120ms; --dur-base:200ms; --dur-slow:320ms;
+  /* Layout */
+  --sidebar-w:248px; --topbar-h:66px;
+}
