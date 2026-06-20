@@ -25,7 +25,25 @@ OWNER_ID = "ramesh"
 
 def get_llm() -> LLM:
     if settings.use_stub_llm or not settings.anthropic_api_key:
-        return StubLLM(text_response="Namaste ji, a gentle reminder about your invoice.")
+        # Deterministic demo persona (no API key): a warm draft plus a structured
+        # plan that BREACHES policy (15% upfront, 45-day extension) so the
+        # Orchestrator runs real policy checks and escalates — the wireframe's
+        # hero HITL scenario. Add ANTHROPIC_API_KEY for genuine agent proposals.
+        from app.agents.negotiation import NegotiationPlanOut
+        demo_plan = NegotiationPlanOut(
+            upfront_pct=15, extension_days=45,
+            installments=[
+                {"seq": 1, "label": "Upfront on confirm", "amount_paise": 36000_00, "due_offset_days": 0},
+                {"seq": 2, "label": "Installment 2", "amount_paise": 102000_00, "due_offset_days": 21},
+                {"seq": 3, "label": "Installment 3", "amount_paise": 102000_00, "due_offset_days": 45},
+            ],
+        )
+        return StubLLM(
+            text_response=(
+                "Namaste Anand ji, hope business is good. I understand this month is "
+                "tight — let's find a way that works for both of us. Could we confirm a "
+                "part-payment now and split the balance over a few weeks?"),
+            structured_response=demo_plan)
     from app.llm.anthropic_client import AnthropicClient
     return AnthropicClient()
 
