@@ -25,3 +25,15 @@ class Decision(str, Enum):
 class Tone(str, Enum):
     GENTLE = "gentle"
     FIRM = "firm"
+
+
+class IngestionSource(str, Enum):
+    CSV = "csv"
+    WHATSAPP = "whatsapp"
+
+
+class JobStatus(str, Enum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    DONE = "done"
+    FAILED = "failed"

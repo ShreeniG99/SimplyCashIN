@@ -90,3 +90,16 @@ class MemoryEmbeddingRow(Base):
     buyer_id: Mapped[str] = mapped_column(ForeignKey("buyer.id", deferrable=True, initially="DEFERRED"))
     snippet: Mapped[str] = mapped_column(Text)
     embedding: Mapped[list[float]] = mapped_column(Vector(EMBED_DIM))
+
+
+class IngestionJobRow(Base):
+    __tablename__ = "ingestion_job"
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("owner.id", deferrable=True, initially="DEFERRED"))
+    source: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String)
+    total_rows: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    imported_rows: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime)
+    completed_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)

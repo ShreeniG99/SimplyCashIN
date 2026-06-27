@@ -6,3 +6,5 @@ pydantic>=2.7
 pydantic-settings>=2.3
 anthropic>=0.69
 posthog>=3.5
+redis>=5.0
+apscheduler>=3.10

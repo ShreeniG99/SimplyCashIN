@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     test_database_url: str = "postgresql+asyncpg://scin:scin@localhost:5432/scin_test"
     posthog_api_key: str = ""
     posthog_host: str = "https://us.i.posthog.com"
+    redis_url: str = "redis://localhost:6379/0"
 
 
 settings = Settings()

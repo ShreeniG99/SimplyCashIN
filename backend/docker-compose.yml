@@ -14,5 +14,19 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  redis:
+    image: redis:7.2-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - scin_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
 volumes:
   scin_pgdata:
+  scin_redis:

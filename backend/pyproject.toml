@@ -14,6 +14,8 @@ dependencies = [
     "pydantic-settings>=2.3",
     "anthropic>=0.69",
     "posthog>=3.5",
+    "redis>=5.0",
+    "apscheduler>=3.10",
 ]
 
 [project.optional-dependencies]
@@ -27,6 +29,7 @@ dev = [
 asyncio_mode = "auto"
 markers = [
     "db: requires a running Postgres (docker-compose up)",
+    "redis: requires a running Redis (docker-compose up)",
     "integration: hits the real Anthropic API",
 ]
 addopts = "-m 'not integration'"

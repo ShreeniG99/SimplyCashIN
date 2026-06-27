@@ -4,7 +4,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from app.domain.enums import (
-    CashEventStatus, Decision, Direction, InvoiceStatus, Tone,
+    CashEventStatus, Decision, Direction, InvoiceStatus, JobStatus, IngestionSource, Tone,
 )
 
 
@@ -126,3 +126,22 @@ class CycleResult(BaseModel):
     checks: list[PolicyCheck]
     escalation: Escalation | None
     urgency: CashUrgency
+
+
+class IngestionJob(BaseModel):
+    id: str
+    owner_id: str
+    source: IngestionSource
+    status: JobStatus
+    total_rows: int | None = None
+    imported_rows: int | None = None
+    error_message: str | None = None
+    created_at: dt.datetime
+    completed_at: dt.datetime | None = None
+
+
+class QueuedItem(BaseModel):
+    buyer_id: str
+    invoice_id: str
+    urgency_score: float
+    due_date: dt.date

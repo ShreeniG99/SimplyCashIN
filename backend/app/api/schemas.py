@@ -89,3 +89,36 @@ class BuyerDetailOut(BaseModel):
     invoice: InvoiceOut
     thread: list[ThreadTurnOut]
     best_approach: str | None
+
+
+# ---- M2: Ingestion + Queue + Scheduler ----
+
+class IngestionJobOut(BaseModel):
+    id: str
+    source: str
+    status: str
+    total_rows: int | None
+    imported_rows: int | None
+    error_message: str | None
+    created_at: str
+    completed_at: str | None
+
+
+class QueuedItemOut(BaseModel):
+    buyer_id: str
+    invoice_id: str
+    urgency_score: float
+    due_date: str
+
+
+class QueueStatusOut(BaseModel):
+    size: int
+    items: list[QueuedItemOut]
+
+
+class ScheduleRunOut(BaseModel):
+    run_id: str
+    owner_id: str
+    date: str
+    processed: int
+    urgency_score: float

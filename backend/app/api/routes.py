@@ -159,3 +159,95 @@ async def resolve_escalation(esc_id: str, body: schemas.ResolveIn,
 
     await repo.resolve(esc_id, resolution)
     return {"id": esc_id, "resolved": True, "resolution": resolution}
+
+
+# ---- M2: Ingestion ----
+
+@router.post("/ingest/csv")
+async def ingest_csv(file: bytes, session: AsyncSession = Depends(get_session)):
+    from app.ingestion.csv_connector import CSVConnector
+    from app.services.ingestion import IngestionService
+    from app.domain.enums import IngestionSource
+    svc = IngestionService(session)
+    try:
+        job_id = await svc.ingest(file, OWNER_ID, CSVConnector(), IngestionSource.CSV)
+        return {"job_id": job_id, "status": "submitted"}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/ingest/whatsapp")
+async def ingest_whatsapp(file: bytes, session: AsyncSession = Depends(get_session)):
+    from app.ingestion.whatsapp_connector import WhatsAppConnector
+    from app.services.ingestion import IngestionService
+    from app.domain.enums import IngestionSource
+    svc = IngestionService(session)
+    try:
+        job_id = await svc.ingest(file, OWNER_ID, WhatsAppConnector(), IngestionSource.WHATSAPP)
+        return {"job_id": job_id, "status": "submitted"}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get("/ingest/jobs", response_model=list[schemas.IngestionJobOut])
+async def list_ingestion_jobs(session: AsyncSession = Depends(get_session)):
+    from sqlalchemy import select
+    from app.db.models import IngestionJobRow
+    rows = await session.execute(
+        select(IngestionJobRow).where(IngestionJobRow.owner_id == OWNER_ID)
+    )
+    return [schemas.IngestionJobOut(
+        id=r.id, source=r.source, status=r.status,
+        total_rows=r.total_rows, imported_rows=r.imported_rows,
+        error_message=r.error_message,
+        created_at=r.created_at.isoformat() if r.created_at else None,
+        completed_at=r.completed_at.isoformat() if r.completed_at else None,
+    ) for r in rows.scalars().all()]
+
+
+# ---- M2: Redis Queue ----
+
+@router.get("/queue", response_model=schemas.QueueStatusOut)
+async def get_queue():
+    from app.queue.redis_queue import RedisUrgencyQueue
+    try:
+        q = RedisUrgencyQueue()
+        items = q.peek(k=5)
+        return schemas.QueueStatusOut(
+            size=q.size(),
+            items=[schemas.QueuedItemOut(
+                buyer_id=i["buyer_id"], invoice_id=i["invoice_id"],
+                urgency_score=i["urgency_score"], due_date=i["due_date"]) for i in items])
+    except Exception:
+        return schemas.QueueStatusOut(size=0, items=[])
+
+
+@router.post("/queue/pop")
+async def pop_queue():
+    from app.queue.redis_queue import RedisUrgencyQueue
+    q = RedisUrgencyQueue()
+    item = q.pop()
+    if not item:
+        raise HTTPException(status_code=404, detail="queue empty")
+    return item
+
+
+# ---- M2: Scheduler ----
+
+@router.get("/schedule/status")
+async def schedule_status():
+    from app.queue.redis_queue import RedisUrgencyQueue
+    try:
+        q = RedisUrgencyQueue()
+        return {"status": "ready", "queue_size": q.size()}
+    except Exception:
+        return {"status": "redis_unavailable", "queue_size": 0}
+
+
+@router.post("/schedule/trigger")
+async def trigger_schedule():
+    from app.scheduler.daily import DailyOverdueTrigger
+    from app.db.session import SessionFactory
+    trigger = DailyOverdueTrigger(SessionFactory)
+    result = await trigger.run(owner_id=OWNER_ID)
+    return result
