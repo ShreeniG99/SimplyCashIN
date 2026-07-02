@@ -57,7 +57,7 @@ class WhatsAppConnector:
     def _extract_amounts(self, text: str) -> list[int]:
         amounts: list[int] = []
         for m in self._AMOUNT_RE.finditer(text):
-            num_str = m.group(1) or f"{m.group(2) or ''}{m.group(3) or ''}"
+            num_str = m.group(1)
             if num_str:
                 num = int(num_str.replace(",", ""))
                 if num > 100:  # likely meaningful

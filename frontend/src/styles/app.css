@@ -237,3 +237,43 @@ button{font-family:inherit;}
 .skel{background:linear-gradient(90deg,var(--grey-100) 25%,var(--grey-50) 37%,var(--grey-100) 63%);
   background-size:400% 100%;animation:shimmer 1.4s infinite;border-radius:6px;}
 @keyframes shimmer{0%{background-position:100% 0;}100%{background-position:-100% 0;}}
+
+/* ---- Buyers page ---- */
+.search-box{display:flex;align-items:center;gap:8px;border:1px solid var(--border-default);border-radius:var(--radius-pill);
+  padding:7px 14px;background:var(--white);min-width:220px;}
+.search-box input{flex:1;border:0;outline:none;font-family:inherit;font-size:13px;color:var(--text-strong);background:transparent;}
+
+.buyer-stats{display:flex;gap:14px;flex-wrap:wrap;}
+.buyer-stat{display:flex;align-items:center;gap:10px;padding:12px 16px;background:var(--surface-card);border:1px solid var(--border-subtle);
+  border-radius:var(--radius-md);flex:1;min-width:140px;}
+.buyer-stat-val{font-size:22px;font-weight:700;color:var(--text-strong);font-family:var(--font-heading);}
+.buyer-stat-label{font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;font-weight:600;}
+
+.upload-zone{position:relative;border:2px dashed var(--border-subtle);border-radius:var(--radius-md);padding:20px;text-align:center;
+  background:var(--surface-card);transition:border-color var(--dur-fast),background var(--dur-fast);cursor:pointer;}
+.upload-zone:hover{border-color:var(--azure-300);background:var(--azure-50);}
+.upload-zone.drag{border-color:var(--azure-400);background:var(--azure-100);}
+
+.buyer-table-card{background:var(--surface-card);border:1px solid var(--border-subtle);border-radius:var(--radius-lg);overflow:hidden;}
+.buyer-table-header{display:flex;align-items:center;padding:10px 16px;background:var(--grey-50);border-bottom:1px solid var(--border-subtle);
+  font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;cursor:pointer;user-select:none;}
+.buyer-table-header .buyer-cell:hover{color:var(--text-strong);}
+.buyer-row{display:flex;align-items:center;padding:13px 16px;border-bottom:1px solid var(--border-subtle);
+  transition:background var(--dur-fast);cursor:pointer;font-size:13px;}
+.buyer-row:last-child{border-bottom:0;}
+.buyer-row:hover{background:var(--grey-50);}
+.buyer-cell{padding:0 8px;}
+.buyer-col-name{width:240px;flex:none;display:flex;align-items:center;gap:10px;}
+.buyer-col-tier{width:160px;flex:none;}
+.buyer-col-amt{width:120px;flex:none;}
+.buyer-col-status{width:130px;flex:none;}
+.buyer-col-od{width:70px;flex:none;}
+.buyer-col-channel{width:140px;flex:none;}
+.buyer-col-action{width:80px;flex:none;text-align:right;}
+
+.channel-pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--azure-800);background:var(--azure-50);
+  border:1px solid var(--azure-200);border-radius:999px;padding:3px 10px;}
+
+.job-toast{display:flex;flex-direction:column;gap:6px;padding:10px 14px;background:var(--success-soft);border:1px solid var(--success);
+  border-radius:var(--radius-md);font-size:13px;color:var(--success-fg);}
+.job-toast span{display:flex;align-items:center;gap:6px;}

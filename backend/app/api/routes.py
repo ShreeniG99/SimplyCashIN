@@ -1,6 +1,6 @@
 import datetime as dt
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.orchestrator import Orchestrator
@@ -164,26 +164,36 @@ async def resolve_escalation(esc_id: str, body: schemas.ResolveIn,
 # ---- M2: Ingestion ----
 
 @router.post("/ingest/csv")
-async def ingest_csv(file: bytes, session: AsyncSession = Depends(get_session)):
+async def ingest_csv(
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(get_session),
+):
     from app.ingestion.csv_connector import CSVConnector
     from app.services.ingestion import IngestionService
     from app.domain.enums import IngestionSource
+
+    raw = await file.read()
     svc = IngestionService(session)
     try:
-        job_id = await svc.ingest(file, OWNER_ID, CSVConnector(), IngestionSource.CSV)
+        job_id = await svc.ingest(raw, OWNER_ID, CSVConnector(), IngestionSource.CSV)
         return {"job_id": job_id, "status": "submitted"}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.post("/ingest/whatsapp")
-async def ingest_whatsapp(file: bytes, session: AsyncSession = Depends(get_session)):
+async def ingest_whatsapp(
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(get_session),
+):
     from app.ingestion.whatsapp_connector import WhatsAppConnector
     from app.services.ingestion import IngestionService
     from app.domain.enums import IngestionSource
+
+    raw = await file.read()
     svc = IngestionService(session)
     try:
-        job_id = await svc.ingest(file, OWNER_ID, WhatsAppConnector(), IngestionSource.WHATSAPP)
+        job_id = await svc.ingest(raw, OWNER_ID, WhatsAppConnector(), IngestionSource.WHATSAPP)
         return {"job_id": job_id, "status": "submitted"}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -212,9 +222,9 @@ async def get_queue():
     from app.queue.redis_queue import RedisUrgencyQueue
     try:
         q = RedisUrgencyQueue()
-        items = q.peek(k=5)
+        items = q.peek(k=5, owner_id=OWNER_ID)
         return schemas.QueueStatusOut(
-            size=q.size(),
+            size=q.size(owner_id=OWNER_ID),
             items=[schemas.QueuedItemOut(
                 buyer_id=i["buyer_id"], invoice_id=i["invoice_id"],
                 urgency_score=i["urgency_score"], due_date=i["due_date"]) for i in items])
@@ -226,7 +236,7 @@ async def get_queue():
 async def pop_queue():
     from app.queue.redis_queue import RedisUrgencyQueue
     q = RedisUrgencyQueue()
-    item = q.pop()
+    item = q.pop(owner_id=OWNER_ID)
     if not item:
         raise HTTPException(status_code=404, detail="queue empty")
     return item
@@ -239,7 +249,7 @@ async def schedule_status():
     from app.queue.redis_queue import RedisUrgencyQueue
     try:
         q = RedisUrgencyQueue()
-        return {"status": "ready", "queue_size": q.size()}
+        return {"status": "ready", "queue_size": q.size(owner_id=OWNER_ID)}
     except Exception:
         return {"status": "redis_unavailable", "queue_size": 0}
 

@@ -42,6 +42,7 @@ class DailyOverdueTrigger:
                     urgency_score=urgency.score,
                     invoice_id=inv_row.id,
                     due_date=inv_row.due_date.isoformat(),
+                    owner_id=owner_id,
                 )
                 processed += 1
 

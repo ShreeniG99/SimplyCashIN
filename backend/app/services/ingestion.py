@@ -19,7 +19,6 @@ class IngestionService:
 
     async def ingest(self, raw: bytes, owner_id: str, connector: Connector,
                      source: IngestionSource) -> str:
-        from app.ingestion.base import Connector as _Connector
         from sqlalchemy import select
 
         job_id = str(uuid.uuid4())
@@ -51,12 +50,14 @@ class IngestionService:
                         tier=buyer.tier, relationship_years=buyer.relationship_years,
                         on_time_rate=buyer.on_time_rate,
                         preferred_channel=buyer.preferred_channel))
-                    self.s.add(m.InvoiceRow(
-                        id=invoice.id, buyer_id=invoice.buyer_id,
-                        number=invoice.number, amount_paise=invoice.amount_paise,
-                        due_date=invoice.due_date, status=invoice.status.value,
-                        days_overdue=invoice.days_overdue))
-                    imported += 1
+
+                # Always add the invoice (linked to this buyer)
+                self.s.add(m.InvoiceRow(
+                    id=invoice.id, buyer_id=buyer.id,
+                    number=invoice.number, amount_paise=invoice.amount_paise,
+                    due_date=invoice.due_date, status=invoice.status.value,
+                    days_overdue=invoice.days_overdue))
+                imported += 1
 
             job.status = JobStatus.DONE.value
             job.total_rows = total
@@ -64,10 +65,14 @@ class IngestionService:
             job.completed_at = dt.datetime.now(dt.timezone.utc)
             await self.s.commit()
         except Exception as exc:
-            job.status = JobStatus.FAILED.value
-            job.error_message = str(exc)
-            job.completed_at = dt.datetime.now(dt.timezone.utc)
-            await self.s.commit()
+            # Mark as failed (best-effort — if DB is down this also fails)
+            try:
+                job.status = JobStatus.FAILED.value
+                job.error_message = str(exc)[:500]
+                job.completed_at = dt.datetime.now(dt.timezone.utc)
+                await self.s.commit()
+            except Exception:
+                pass  # swallow — original exc is what matters
             raise
 
         return job_id

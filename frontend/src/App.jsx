@@ -4,6 +4,7 @@ import { WifiOff } from "lucide-react";
 import Sidebar from "./components/Sidebar.jsx";
 import Splash from "./screens/Splash.jsx";
 import Dashboard from "./screens/Dashboard.jsx";
+import Buyers from "./screens/Buyers.jsx";
 import Conversation from "./screens/Conversation.jsx";
 import Escalation from "./screens/Escalation.jsx";
 import { api } from "./lib/api.js";
@@ -21,14 +22,31 @@ export default function App() {
   const [resolution, setResolution] = useState(null);
   const [resolving, setResolving] = useState(false);
 
+  // M2 state
+  const [ingestJobs, setIngestJobs] = useState([]);
+  const [queue, setQueue] = useState({ size: 0, items: [] });
+  const [AVU, setAVU] = useState({ status: "unknown", queue_size: 0 });
+
   useEffect(() => {
     (async () => {
       try {
-        const [buyers, cash] = await Promise.all([api.buyers(), api.cashCalendar()]);
+        const [buyers, cash, jobs, q, sched] = await Promise.all([
+          api.buyers(),
+          api.cashCalendar(),
+          api.ingestJobs().catch(() => DEMO.ingestJobs),
+          api.queue().catch(() => DEMO.queue),
+          api.scheduleStatus().catch(() => DEMO.schedule),
+        ]);
         setData({ buyers, cash });
+        setIngestJobs(jobs);
+        setQueue(q);
+        setAVU(sched);
       } catch {
         setOffline(true);
         setData({ buyers: DEMO.buyers, cash: DEMO.cashCalendar });
+        setIngestJobs(DEMO.ingestJobs);
+        setQueue(DEMO.queue);
+        setAVU(DEMO.schedule);
       }
     })();
     const t = setTimeout(() => setSplash(false), 1700);
@@ -62,8 +80,79 @@ export default function App() {
     }
   }
 
-  function home() {
-    setScreen("dashboard"); setDetail(null); setCycle(null); setResolution(null);
+  // M2: upload CSV
+  async function handleCsvUpload(file) {
+    const res = await api.ingestCsv(file);
+    alert(`CSV ingestion started · Job: ${res.job_id}`);
+    // Refresh jobs AND buyers list after ingestion
+    const [jobs, buyers] = await Promise.all([
+      api.ingestJobs().catch(() => DEMO.ingestJobs),
+      api.buyers().catch(() => DEMO.buyers),
+    ]);
+    setIngestJobs(jobs);
+    setData((d) => ({ ...d, buyers }));
+    return res;
+  }
+
+ useEffect(() => { // M2: auto-refresh jobs and queue on interval
+    if (offline) return;
+    const id = setInterval(async () => {
+      try {
+        const [jobs, q, sched] = await Promise.all([
+          api.ingestJobs().catch(() => null),
+          api.queue().catch(() => null),
+          api.scheduleStatus().catch(() => null),
+        ]);
+        if (jobs) setIngestJobs(jobs);
+        if (q) setQueue(q);
+        if (sched) setAVU(sched);
+      } catch { /* ignore */ }
+    }, 5000);
+    return () => clearInterval(id);
+  }, [offline]);
+
+  // M2: upload WhatsApp
+  async function handleWhatsappUpload(text) {
+    const res = await api.ingestWhatsapp(text);
+    alert(`WhatsApp ingestion started · Job: ${res.job_id}`);
+    const [jobs, buyers] = await Promise.all([
+      api.ingestJobs().catch(() => DEMO.ingestJobs),
+      api.buyers().catch(() => DEMO.buyers),
+    ]);
+    setIngestJobs(jobs);
+    setData((d) => ({ ...d, buyers }));
+    return res;
+  }
+
+  // M2: trigger scheduler
+  async function handleScheduleTrigger() {
+    try {
+      const res = await api.scheduleTrigger();
+      alert(`Scheduler triggered · Run: ${res.run_id} · Processed: ${res.processed}`);
+      const q = await api.queue().catch(() => DEMO.queue);
+      setQueue(q);
+    } catch (e) {
+      alert("Schedule trigger failed: " + (e.message || e));
+    }
+  }
+
+  // M2: pop queue
+  async function handlePopQueue() {
+    try {
+      const res = await api.popQueue();
+      alert(`Popped queue · Buyer: ${res.buyer_id} · Urgency: ${res.urgency_score}`);
+      const q = await api.queue().catch(() => DEMO.queue);
+      setQueue(q);
+    } catch (e) {
+      alert("Pop failed: " + (e.message || e));
+    }
+  }
+
+  function navigate(id) {
+    setScreen(id);
+    if (id !== "conversation" && id !== "escalation") {
+      setDetail(null); setCycle(null); setResolution(null);
+    }
   }
 
   if (!data) {
@@ -74,19 +163,40 @@ export default function App() {
 
   return (
     <div className="app">
-      <Sidebar screen={screen} overdueCount={overdueCount} owner={OWNER} onHome={home} />
+      <Sidebar screen={screen} overdueCount={overdueCount} owner={OWNER} onNavigate={navigate} />
 
       {screen === "dashboard" && (
-        <Dashboard buyers={data.buyers} cash={data.cash} owner={OWNER} onSelect={openBuyer} />
+        <Dashboard
+          buyers={data.buyers}
+          cash={data.cash}
+          owner={OWNER}
+          onSelect={openBuyer}
+          ingestJobs={ingestJobs}
+          queue={queue}
+          schedule={AVU}
+          onCsvUpload={handleCsvUpload}
+          onWhatsappUpload={handleWhatsappUpload}
+          onScheduleTrigger={handleScheduleTrigger}
+          onPopQueue={handlePopQueue}
+        />
+      )}
+      {screen === "buyers" && (
+        <Buyers
+          buyers={data.buyers}
+          ingestJobs={ingestJobs}
+          onCsvUpload={handleCsvUpload}
+          onWhatsappUpload={handleWhatsappUpload}
+          onSelect={openBuyer}
+        />
       )}
       {screen === "conversation" && (
         detail
-          ? <Conversation detail={detail} cycle={cycle} onBack={home}
+          ? <Conversation detail={detail} cycle={cycle} onBack={() => navigate("dashboard")}
               onOpenEscalation={() => setScreen("escalation")} />
           : <Loading />
       )}
       {screen === "escalation" && detail && cycle && (
-        <Escalation detail={detail} cycle={cycle} onBack={home}
+        <Escalation detail={detail} cycle={cycle} onBack={() => navigate("dashboard")}
           onResolve={resolve} resolution={resolution} resolving={resolving} />
       )}
 

@@ -1,5 +1,6 @@
+import { useCallback } from "react";
 import { motion } from "framer-motion";
-import { Bell, Wallet, AlertTriangle, TrendingUp, Calendar, Inbox, ChevronRight } from "lucide-react";
+import { Bell, Wallet, AlertTriangle, TrendingUp, Calendar, Inbox, ChevronRight, Upload, MessageSquare, Zap, Clock } from "lucide-react";
 import { Button, Badge, Avatar, AgentChip, Card } from "../components/ui.jsx";
 import { parseINR, compactINR, dayLabel } from "../lib/format.js";
 
@@ -32,7 +33,11 @@ function calendarDays(week) {
   }));
 }
 
-export default function Dashboard({ buyers, cash, owner, onSelect }) {
+export default function Dashboard({
+  buyers, cash, owner, onSelect,
+  ingestJobs = [], queue = { size: 0, items: [] }, schedule = { status: "ready", queue_size: 0 },
+  onCsvUpload, onWhatsappUpload, onScheduleTrigger, onPopQueue,
+}) {
   const active = buyers.filter((b) => b.status !== "paid");
   const overdue = buyers.filter((b) => b.status === "overdue");
   const receivable = active.reduce((s, b) => s + parseINR(b.amount), 0);
@@ -128,8 +133,154 @@ export default function Dashboard({ buyers, cash, owner, onSelect }) {
               ))}
             </Card>
           </motion.div>
+
+          {/* ---- M2: Ingestion & Data Imports ---- */}
+          <IngestionPanel
+            ingestJobs={ingestJobs}
+            onCsvUpload={onCsvUpload}
+            onWhatsappUpload={onWhatsappUpload}
+          />
+
+          {/* ---- M2: Queue & Scheduler ---- */}
+          <QueueSchedulerPanel
+            queue={queue}
+            schedule={schedule}
+            onPopQueue={onPopQueue}
+            onScheduleTrigger={onScheduleTrigger}
+          />
         </motion.div>
       </div>
     </div>
+  );
+}
+
+// ---- M2 sub-components ----
+
+function IngestionPanel({ ingestJobs, onCsvUpload, onWhatsappUpload }) {
+  const handleCsvChange = (e) => {
+    const file = e.target.files[0];
+    if (file && onCsvUpload) onCsvUpload(file);
+  };
+
+  const handlePaste = (e) => {
+    const text = e.target.value;
+    if (text && onWhatsappUpload) {
+      onWhatsappUpload(text);
+      e.target.value = "";
+    }
+  };
+
+  return (
+    <>
+      <motion.div variants={rise}>
+        <div className="sectionhd">
+        <Upload size={16} style={{ color: "var(--azure-600)" }}/>
+          <h2>Data Import</h2>
+          <span className="ln" />
+          <span className="muted" style={{ fontSize: 12 }}>CSV &amp; WhatsApp</span>
+        </div>
+        <Card pad style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div className="rowflex" style={{ gap: 12 }}>
+            <label className="upload-btn" style={{ cursor: "pointer", flex: 1 }}>
+              <input type="file" accept=".csv" style={{ display: "none" }} onChange={handleCsvChange} />
+              <div style={{ border: "1px dashed var(--border-default)", borderRadius: "var(--radius-sm)", padding: "16px 20px", textAlign: "center" }}>
+                <Upload size={20} style={{ color: "var(--azure-600)", marginBottom: 6 }} />
+                <div style={{ fontSize: 13, fontWeight: 600 }}>Upload CSV</div>
+                <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>buyers, invoices, amounts</div>
+              </div>
+            </label>
+            <div style={{ flex: 1 }}>
+              <textarea
+                placeholder="Paste WhatsApp chat export..."
+                style={{ width: "100%", height: 72, border: "1px solid var(--border-default)", borderRadius: "var(--radius-sm)", padding: 10, fontFamily: "inherit", fontSize: 13, resize: "none" }}
+                onBlur={handlePaste}
+              />
+              <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>WhatsApp chat text</div>
+            </div>
+          </div>
+        </Card>
+      </motion.div>
+
+      {ingestJobs.length > 0 && (
+        <motion.div variants={rise}>
+          <div className="sectionhd">
+            <Clock size={16} style={{ color: "var(--azure-600)" }} />
+            <h2>Ingestion Jobs</h2>
+            <span className="ln" />
+          </div>
+          <Card className="rows">
+            {ingestJobs.map((job) => (
+              <div key={job.id} className="row">
+                <div className="who">
+                  <Avatar name={job.source} tone={job.status === "done" ? "success" : "grey"} size="sm" />
+                  <div className="stack">
+                    <span className="nm">{job.source === "csv" ? "CSV Upload" : "WhatsApp Import"}</span>
+                    <span className="sb">
+                      {job.total_rows !== null ? `${job.imported_rows}/${job.total_rows} rows` : "Processing..."}
+                    </span>
+                  </div>
+                </div>
+                <Badge tone={job.status === "done" ? "success" : job.status === "failed" ? "danger" : "warning"} dot>
+                  {job.status}
+                </Badge>
+              </div>
+            ))}
+          </Card>
+        </motion.div>
+      )}
+    </>
+  );
+}
+
+function QueueSchedulerPanel({ queue, schedule, onPopQueue, onScheduleTrigger }) {
+  const statusColor = schedule.status === "ready" ? "var(--success-fg)" : "var(--warning-fg)";
+
+  return (
+    <motion.div variants={rise}>
+      <div className="sectionhd">
+        <Zap size={16} style={{ color: "var(--azure-600)" }} />
+        <h2>Automation</h2>
+        <span className="ln" />
+        <span className="muted" style={{ fontSize: 12 }}>Queue &amp; scheduling</span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <Card pad>
+          <div className="rowflex" style={{ justifyContent: "space-between", marginBottom: 10 }}>
+            <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text-strong)" }}>Urgency Queue</span>
+            <Badge tone="accent">{queue.size} items</Badge>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {queue.items.slice(0, 3).map((item, i) => (
+              <div key={i} className="queue-row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: i < queue.items.slice(0, 3).length - 1 ? "1px solid var(--border-subtle)" : "none" }}>
+                <span style={{ fontSize: 13 }}>{item.buyer_id}</span>
+                <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{(item.urgency_score * 100).toFixed(0)}%</span>
+              </div>
+            ))}
+            {queue.size === 0 && <span className="muted" style={{ fontSize: 13 }}>Queue empty</span>}
+          </div>
+          <Button full size="sm" style={{ marginTop: 12 }} onClick={onPopQueue} disabled={queue.size === 0}>
+            <Zap size={14} /> Pop &amp; trigger cycle
+          </Button>
+        </Card>
+
+        <Card pad>
+          <div className="rowflex" style={{ justifyContent: "space-between", marginBottom: 10 }}>
+            <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text-strong)" }}>Daily Scheduler</span>
+            <div className="rowflex" style={{ gap: 6 }}>
+              <span className="bdot" style={{ background: statusColor }} />
+              <span style={{ fontSize: 12, color: statusColor, fontWeight: 600 }}>{schedule.status}</span>
+            </div>
+          </div>
+          <div style={{ fontSize: 13, color: "var(--text-body)", lineHeight: 1.55 }}>
+            Runs at 9:00 AM daily to scan overdue invoices, compute cash urgency, and queue for collection cycles.
+          </div>
+          <div className="rowflex" style={{ marginTop: 12, gap: 8 }}>
+            <Button full size="sm" onClick={onScheduleTrigger}>
+              <Clock size={14} /> Trigger now
+            </Button>
+          </div>
+        </Card>
+      </div>
+    </motion.div>
   );
 }

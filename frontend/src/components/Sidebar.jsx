@@ -9,7 +9,7 @@ const NAV = [
   { id: "policy", label: "Policy & Agents", icon: Settings },
 ];
 
-export default function Sidebar({ screen, overdueCount, owner, onHome }) {
+export default function Sidebar({ screen, overdueCount, owner, onNavigate }) {
   const active = screen === "conversation" || screen === "escalation" ? "inbox" : screen;
   return (
     <aside className="side">
@@ -21,7 +21,7 @@ export default function Sidebar({ screen, overdueCount, owner, onHome }) {
         {NAV.map((n) => {
           const Ico = n.icon;
           return (
-            <div key={n.id} className={`navitem${active === n.id ? " active" : ""}`} onClick={onHome}>
+            <div key={n.id} className={`navitem${active === n.id ? " active" : ""}`} onClick={() => onNavigate(n.id)}>
               <Ico className="ico" strokeWidth={1.9} />
               {n.label}
               {n.count && overdueCount ? <span className="count">{overdueCount}</span> : null}

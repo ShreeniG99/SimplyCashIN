@@ -58,4 +58,27 @@ export const DEMO = {
     urgency: 0.0,
     breaching_need: "₹1,20,000 to GST + supplier due Mon",
   },
+
+  // M2: Ingestion jobs (offline fallback)
+  ingestJobs: [
+    { id: "job-1", source: "csv", status: "done", total_rows: 12, imported_rows: 10, error_message: null, created_at: "2026-05-18T10:00:00", completed_at: "2026-05-18T10:01:00" },
+    { id: "job-2", source: "whatsapp", status: "pending", total_rows: null, imported_rows: null, error_message: null, created_at: "2026-05-18T14:30:00", completed_at: null },
+  ],
+
+  // M2: Queue (offline fallback)
+  queue: {
+    size: 3,
+    items: [
+      { buyer_id: "anand", invoice_id: "inv-anand", urgency_score: 0.85, due_date: "2026-05-01" },
+      { buyer_id: "rajan", invoice_id: "inv-rajan", urgency_score: 0.62, due_date: "2026-05-10" },
+      { buyer_id: "kpauto", invoice_id: "inv-kpauto", urgency_score: 0.41, due_date: "2026-05-22" },
+    ],
+  },
+
+  // M2: Schedule (offline fallback)
+  schedule: {
+    status: "ready",
+    queue_size: 3,
+    last_run: "2026-05-18T09:00:00",
+  },
 };
