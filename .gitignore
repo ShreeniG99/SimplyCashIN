@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+# Env / secrets
+.env
+*.env.local
+# Data stores
+*.sqlite3
+chroma/
+.chroma/
+# OS
+.DS_Store
+Thumbs.db

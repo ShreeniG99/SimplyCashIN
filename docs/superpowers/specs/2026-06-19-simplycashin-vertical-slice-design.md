@@ -1,0 +1,364 @@
+# SimplyCashIN — M1 Vertical Slice Design
+
+**Date:** 2026-06-19
+**Status:** Approved for planning
+**Author:** Team SimplyMinnal (with Claude)
+
+## Context
+
+SimplyCashIN is a multi-agent system for Indian MSME owners that autonomously
+manages overdue receivables: it follows up buyers with tone-aware messages,
+proposes payment plans bounded by the owner's policy and cash position, and
+pulls the owner into the loop only when a situation escalates. The product
+speaks through four named agents (Orchestrator, Context, Conversation,
+Negotiation) and never sends anything to a buyer without owner approval when
+policy is breached.
+
+The repository currently contains the **design system and UI shell only**
+(tokens, React components, three wireframes, a mobile prototype) driven by
+static sample data (`WFDATA` in `ui_kits/wireframes/data.js`). Nothing is alive.
+This effort builds the actual system behind those screens, production-grade, in
+sequenced milestones.
+
+### Decisions locked during brainstorming
+
+- **Target:** production-grade full stack, decomposed into milestones; vertical
+  slice first.
+- **LLM:** Anthropic Claude, model `claude-opus-4-8`, via the official
+  `anthropic` Python SDK. Adaptive thinking; structured outputs for the
+  negotiation plan.
+- **External services:** built behind swappable adapter interfaces from M1; real
+  implementations land in later milestones. M1 ships a simulated channel.
+- **Location:** a new `backend/` directory in this repository. A real frontend
+  app is a later milestone; M1's API matches the existing `WFDATA` shapes so
+  wiring is trivial.
+- **M1 datastore:** PostgreSQL **with the `pgvector` extension** (structured
+  rows *and* vectors in one store) via `docker-compose`. Supabase is the managed
+  Postgres target — local dev uses the `pgvector/pgvector` image so the schema is
+  Supabase-compatible.
+- **Auth:** Supabase Auth (issues JWTs) instead of Firebase — keeps Postgres,
+  auth, and (later) realtime in one provider. Lands in M4.
+- **Observability:** PostHog LLM analytics traces every agent call and decision
+  (the verification-loop tooling). Wired as a thin, swappable tracer from M1.
+- **API key:** real Claude calls (key read from `ANTHROPIC_API_KEY`); a
+  deterministic stub LLM is used in tests.
+
+## Milestone roadmap
+
+Each milestone is its own spec → plan → build cycle.
+
+| # | Milestone | Delivers |
+|---|---|---|
+| **M1** | Vertical slice — agent brain + thin API (**this spec**) | One buyer end-to-end: ingest → Context → Conversation → Negotiation → Orchestrator act/escalate → simulated dispatch → Memory. Postgres+pgvector, Anthropic client, PostHog tracer, policy engine, cash-calendar service, FastAPI endpoints. |
+| M2 | Ingestion & scheduling | CSV + WhatsApp-export connectors, APScheduler daily overdue trigger, Redis urgency sorted-set, vectorization pipeline. |
+| M3 | Channels & dispatch | Celery+Redis async dispatch with retry, Twilio WhatsApp/SMS, aiosmtplib email, inbound reply webhooks. |
+| M4 | Auth & multi-tenancy | Supabase Auth + JWT, per-owner data + vector-namespace sandboxing (Postgres RLS). |
+| M5 | Realtime HITL + frontend | WebSocket HITL gateway (approve/edit/override before send); real React app consuming the API. |
+
+Anything outside M1 is abstracted behind an interface in M1 (a `Channel`
+protocol, an `LLM` client, a `Clock`) so later milestones swap implementations
+without touching the core.
+
+### Differentiators vs Peakflo (deferred — not in M1)
+
+Researched and intentionally kept out of the lean M1 slice; scheduled for later
+milestones. The M1 architecture leaves clean seams for each.
+
+- **A — Regional-language, tone-aware messaging** (Tamil/Hindi/Hinglish/Tanglish):
+  a per-buyer `language` fed to the Conversation agent's system prompt. Peakflo
+  and generic tools are English-centric; this drives WhatsApp response rates for
+  Tier-2/3 buyers. *Target: M3 (with channels) or earlier.*
+- **B — Statutory escalation ladder + MSME Samadhaan draft:** named escalation
+  rungs that cite **Section 43B(h)** (a buyer loses the income-tax deduction on
+  amounts unpaid to a registered micro/small supplier beyond 45 days) and
+  **Section 16, MSMED Act** (interest at 3× the RBI bank rate); the top rung
+  auto-drafts an **MSME Samadhaan** complaint (MSEFC, 90-day adjudication).
+  Firm-but-never-threatening, and uniquely Indian — generic tools don't do this.
+  *Target: M2/M3 (extends the escalation path + a draft-generation Claude call).*
+- **D — Working-capital bridge nudge:** when cash is tight and an invoice is
+  badly overdue, suggest an early-pay discount or flag the receivable as
+  financeable (e.g. TReDS / invoice discounting). The real MSME pain is capital,
+  not just reminders. Needs financing-partner data. *Target: M5+ (stretch).*
+
+## Goals (M1)
+
+- A complete, runnable decision loop for a single overdue invoice.
+- Deterministic, auditable ACT-vs-ESCALATE decision (code, not an LLM call).
+- Tone-aware buyer message and policy-bounded payment plan generated by Claude.
+- Cash Calendar that makes firmness a function of the owner's own cash urgency.
+- Memory layer that records outcomes for future retrieval.
+- FastAPI endpoints that expose the loop and return data in the shapes the
+  existing UI already consumes.
+
+## Non-goals (M1)
+
+- Real WhatsApp/SMS/email dispatch (simulated).
+- Auth / multi-tenancy (single hard-coded owner).
+- Scheduling, Celery, Redis, inbound webhooks.
+- A new frontend app.
+
+## Architecture
+
+### Directory layout
+
+```
+backend/
+  app/
+    config.py          # settings from env (ANTHROPIC_API_KEY, DB urls, USE_STUB_LLM)
+    domain/            # Pydantic models: Owner, Buyer, Invoice, ConversationTurn,
+                       #   PaymentPlan, PaymentInstallment, Escalation, PolicyCheck,
+                       #   BuyerContext, CashCalendar, CashEvent, MemoryRecord, CycleResult
+    db/
+      models.py        # SQLAlchemy async ORM models
+      repositories.py  # data access (buyers, invoices, conversations, memory, escalations)
+      session.py       # async engine + session factory
+      seed.py          # seeds the Ramesh Iyer / Sri Vinayaga Motors fixture
+    migrations/        # Alembic
+    llm/
+      base.py          # LLM protocol (.complete_structured(), .complete_text())
+      anthropic_client.py  # claude-opus-4-8, adaptive thinking, structured outputs
+      stub.py          # deterministic stub for tests / no-key runtime
+    retrieval/
+      vector_store.py  # pgvector wrapper: embed + similarity search (per-buyer namespace column)
+    agents/
+      context.py       # ContextAgent → BuyerContext (vector + structured lookup)
+      conversation.py  # ConversationAgent → tone-aware draft (text)
+      negotiation.py   # NegotiationAgent → PaymentPlan (structured output)
+      orchestrator.py  # Orchestrator → runs loop, decides ACT vs ESCALATE
+    services/
+      cash_calendar.py # urgency score from inflows/outflows + need flags
+      policy.py        # guardrail checks (max extension days, min upfront %)
+      memory.py        # write/read winning tone/plan/timing per buyer
+    channels/
+      base.py          # Channel protocol
+      simulated.py     # SimulatedChannel (records "sent", no external call)
+    obs/
+      tracer.py        # Tracer protocol + PostHogTracer + NullTracer
+    api/
+      app.py           # FastAPI app factory
+      routes.py        # endpoints
+  tests/
+  docker-compose.yml   # postgres + pgvector (single service)
+  pyproject.toml
+  .env.example
+  README.md
+```
+
+### Units and responsibilities
+
+Each unit has one purpose, a defined interface, and is testable in isolation.
+
+- **`LLM` protocol** — `complete_text(system, messages, ...) -> str` and
+  `complete_structured(system, messages, schema) -> dict`. Implemented by
+  `AnthropicClient` (real) and `StubLLM` (deterministic). Depends on nothing
+  but its inputs. The single seam through which all Claude calls flow.
+- **`ContextAgent`** — input: buyer id + invoice; output: `BuyerContext`
+  (tier, on-time rate, days overdue, channel, best past approach). Hybrid
+  retrieval: structured invoice/buyer lookup from Postgres + `pgvector`
+  similarity search over prior conversation/outcome snippets (same database).
+  Depends on repositories + `VectorStore`. No LLM call.
+- **`CashCalendarService`** — input: the owner's `CashEvent` rows for the
+  period; output: `urgency` in [0,1] plus the breaching cash need (e.g. "₹1.2L
+  due Monday"). Pure function over structured data. No LLM call. A `CashEvent`
+  has a `direction` (`in` = a buyer's payment due to the owner; `out` = the
+  owner's obligation to a supplier / wages / GST), `due_date`, `counterparty`,
+  `amount`, `label`, and `status` (`pending` | `done`). Urgency rises with the
+  size and nearness of **out** events in the current week relative to expected
+  **in** events — i.e. how badly the owner needs cash now. This urgency feeds
+  the Conversation and Negotiation agents (firmer when the owner's own
+  obligations are pressing).
+- **`ConversationAgent`** — input: `BuyerContext` + `urgency` + thread; output:
+  a buyer-facing message string. One `claude-opus-4-8` text call. System prompt
+  encodes the brand voice (warm, relationship-first, respectful Indian-English;
+  firmness scales with overdue-ness and urgency but never threatens).
+- **`NegotiationAgent`** — input: invoice + `Policy` + `urgency` + buyer's
+  request; output: a `PaymentPlan` via structured output (validated JSON:
+  installments, amounts, due offsets, upfront %, extension days). One
+  `claude-opus-4-8` structured call.
+- **`PolicyEngine`** — input: `PaymentPlan` + `Policy` + cash need; output:
+  ordered list of `PolicyCheck` (label, value, ok). Pure, deterministic.
+  Checks: within max extension days, meets min upfront %, owner cash need this
+  week, relationship tier. This is what makes ACT/ESCALATE auditable.
+- **`MemoryService`** — `record_outcome(buyer, tone, plan, timing, paid)` and
+  `best_approach(buyer)`. Writes structured rows to Postgres and embeds a
+  summary snippet into the `pgvector` table for the ContextAgent to retrieve
+  next time.
+- **`Tracer` protocol** — `trace(agent, model, prompt, response, decision, ...)`.
+  Implemented by `PostHogTracer` (LLM analytics) and a no-op `NullTracer` (tests
+  / no key). Every agent call and the final ACT/ESCALATE decision are traced, so
+  the owner-facing verification loop has an audit trail. Swappable; off by
+  default when `POSTHOG_API_KEY` is unset.
+- **`Channel` protocol** — `send(buyer, message, channel_kind) -> DispatchResult`.
+  `SimulatedChannel` records the send and returns success without an external
+  call. M3 adds Twilio/SMTP implementations.
+- **`Orchestrator`** — composes the above. Runs the loop for one invoice and
+  returns a `CycleResult` (decision = ACT | ESCALATE, plus the draft, plan,
+  context, policy checks, and any escalation). **The ACT/ESCALATE branch is
+  plain Python over `PolicyCheck` results — never an LLM call.**
+
+### The decision loop
+
+For one overdue invoice belonging to the single M1 owner:
+
+1. `ContextAgent.build(buyer, invoice)` → `BuyerContext`.
+2. `CashCalendarService.urgency(owner_week)` → `(urgency, breaching_need)`.
+3. `ConversationAgent.draft(context, urgency, thread)` → message.
+4. If the latest buyer turn signals inability to pay in full / a request for
+   time, `NegotiationAgent.propose(invoice, policy, urgency, buyer_request)` →
+   `PaymentPlan`. (If no negotiation is needed, the cycle ends after a plain
+   reminder draft.)
+5. `PolicyEngine.evaluate(plan, policy, breaching_need)` → `[PolicyCheck]`.
+6. Orchestrator decision:
+   - **All checks ok and within autonomy** → **ACT**: `SimulatedChannel.send(...)`,
+     then `MemoryService.record_outcome(...)`.
+   - **Any check fails** → **ESCALATE**: build `Escalation` (buyer, amount,
+     reason, the check list, a recommendation). Nothing is sent.
+7. Return `CycleResult`.
+
+### LLM usage details
+
+- Model `claude-opus-4-8`; `thinking={"type": "adaptive"}`. Streaming with
+  `.get_final_message()` for the longer conversation drafts.
+- Negotiation uses `output_config.format` with a JSON schema matching
+  `PaymentPlan` so the plan is validated before the policy engine sees it.
+- The owner's `Policy` (max extension days, min upfront %) and the cash-calendar
+  urgency are passed in the prompt. Brand-voice rules live in the Conversation
+  agent's system prompt (frozen → cache-friendly for later milestones).
+- Key from `ANTHROPIC_API_KEY`. When `USE_STUB_LLM=1`, `StubLLM` is injected
+  instead (tests always use the stub; runtime uses the real client by default).
+
+### API (FastAPI, M1)
+
+- `POST /buyers/{buyer_id}/run-cycle` → runs the loop, returns `CycleResult`
+  (decision, draft, plan, context, checks, escalation).
+- `GET /buyers` → list in the `WFDATA.buyers` shape (id, name, tier, amount,
+  status, tone, agent, action, escalated).
+- `GET /buyers/{buyer_id}` → buyer detail in the `WFDATA.buyerContext` + `thread`
+  + `plan` shapes.
+- `GET /cash-calendar` → per-day aggregation for the calendar grid (each day:
+  count of `in` events and count of `out` events → dot counts by colour) plus
+  the current week's `CashEvent` list for the checklist below the grid.
+- `POST /cash-events/{id}/toggle` → mark a cash event `done`/`pending` (strikes
+  it through in the checklist and recomputes urgency).
+- `POST /escalations/{id}/resolve` → body `{action: approve|edit|override, ...}`;
+  the human-in-the-loop seam. In-process for M1; M5 makes it realtime over
+  WebSocket. On approve → dispatch + memory; on override → record owner choice.
+
+Matching the `WFDATA` field shapes keeps M5's frontend wiring to a thin mapping.
+
+### Data model (Postgres)
+
+`owner`, `buyer`, `invoice`, `conversation_turn`, `payment_plan`,
+`payment_installment`, `escalation`, `memory_record`, `cash_event`. Async
+SQLAlchemy + Alembic. `db/seed.py` loads the Ramesh Iyer / Sri Vinayaga Motors
+fixture from `ui_kits/wireframes/data.js` (Anand Motors et al.) so the slice
+demos against the exact scenario the wireframes show. A `memory_embedding` table
+(pgvector) stores per-buyer conversation/outcome embeddings with a `buyer_id`
+(and later `owner_id`) column as the namespace — forward-compatible with M4's
+per-owner sandboxing via Postgres row-level security.
+
+### Cash Calendar UI (forward spec for M5; data model lands in M1)
+
+The Cash Calendar is a month-grid calendar with **per-day dots**:
+
+- **Blue dots (azure, `--azure-300`)** — `in` events: payments due to the owner
+  from buyers on that day. One dot per buyer due that day (many buyers → many
+  dots).
+- **Red dots (status danger, `--status-overdue`)** — `out` events: the owner's
+  own payment deadlines (suppliers, wages, GST). One dot per obligation.
+
+Below the grid sits a **to-do list of the selected/current week's `CashEvent`s**
+— each row shows the date chip, label, counterparty, amount, and direction
+colour. Marking one done (`POST /cash-events/{id}/toggle`) **strikes it through**
+and recomputes the owner's cash urgency. This is the owner's at-a-glance answer
+to "how badly do I need cash this week", which is exactly the signal that drives
+how firmly the agents push buyers.
+
+> **Brand-colour note:** the design-system readme proposes status colours
+> (green=paid, amber=due-soon, red=overdue, azure=agent). This calendar
+> deliberately maps **in → azure** and **out → red**, which stays on-brand
+> (azure is the hero accent; red is the danger token) and overrides the older
+> `inPip`/`outPip` mono treatment in `WFDATA.cashCalendar`. The M1 `cash_event`
+> model carries everything the UI needs; the grid component is built in M5.
+
+## Plan validation (Peakflo benchmark · Karpathy's principles · OODA)
+
+This design was checked against an external benchmark and two reasoning frames.
+The findings below are folded into the plan; none invalidate the architecture.
+
+**Peakflo benchmark.** Peakflo's public product API is **REST + JWT** with
+ISO-8601/ISO-4217 conventions — our FastAPI + JWT (Supabase-issued) choice
+matches. Peakflo's public agent repo (`peakflo/20x`) is built on **Anthropic
+Claude + the Claude Agent SDK**, validating Claude as the model choice, though
+that repo is a TypeScript/Electron desktop tool — not a reference for our Python
+receivables backend. Our stack is an independently standard Python choice, not a
+copy of theirs.
+
+**Karpathy's principles → design refinements.**
+- *Autonomy slider (not binary autonomy):* the owner's `Policy` becomes an
+  explicit **autonomy level** the owner controls — e.g. `auto_send_within_policy`
+  / `review_above_amount(₹X)` / `always_review` — rather than a single
+  ACT-vs-ESCALATE rule. The policy guardrails ARE the slider's mechanism.
+- *Fast generation-verification loop:* the HITL escalation screen is the
+  verification surface. Every escalation must render the draft/plan, the policy
+  checks, and a one-click approve/edit/override — optimised for fast human
+  review (Karpathy's "make verification easy and fast").
+- *Partial autonomy / "works.all()":* vertical-slice-first plus deterministic
+  ACT/ESCALATE keeps the system honest; agents never send on a policy breach.
+- *Build for agents, not just humans:* expose an `llms.txt` and keep the API
+  agent-readable (forward-looking; an MCP surface is a possible later milestone
+  so other agents can consume SimplyCashIN).
+
+**OODA mapping (the loop is a Boyd OODA loop):**
+- **Observe** — Context agent (buyer history + invoice) + Cash Calendar (owner
+  cash position).
+- **Orient** — Memory (what worked before) + Policy + urgency frame the
+  situation.
+- **Decide** — Orchestrator chooses ACT vs ESCALATE (deterministic).
+- **Act** — Channel dispatch, or escalate to the owner; outcome feeds Memory,
+  closing the loop.
+
+**Stack notes (non-blocking, revisit in later milestones):**
+- *Vector store:* **decided — `pgvector` inside Postgres**, not a separate
+  ChromaDB service (one fewer container; Supabase-compatible). The PDF named
+  Chroma; this is a deliberate, justified deviation.
+- *Scheduler vs queue overlap:* APScheduler (in-process trigger) + Celery
+  (distributed dispatch) overlap in responsibility. The PDF's split (APScheduler
+  detects overdue → Celery dispatches) is reasonable; just don't duplicate the
+  same job in both. Decided in M2/M3.
+- *Orchestration framework:* keep the **hand-rolled orchestrator** (workflow
+  tier) for M1 — deterministic, auditable, and aligned with Anthropic's
+  guidance. LangGraph is only worth adopting if cyclic multi-turn negotiation
+  state grows complex; it adds abstraction and LangChain coupling otherwise.
+
+## Error handling
+
+- LLM failures (rate limit, 5xx) surface as a typed `LLMError`; the Orchestrator
+  treats an LLM failure mid-cycle as an **escalation** (never silently send or
+  silently drop) with reason "agent could not complete — needs your attention".
+- A `NegotiationAgent` plan that fails schema validation → escalate.
+- Channel send failure → escalate, record the failure.
+- DB connection errors fail fast at startup (docker-compose dependency).
+- Tracing failures (PostHog) are swallowed — observability must never break a
+  collections cycle.
+- Refusal handling: if Claude returns `stop_reason == "refusal"`, treat as
+  escalation; do not read `content` blindly.
+
+## Testing strategy
+
+TDD. The `LLM` and `Channel` seams make the core deterministic.
+
+- **Unit:** `PolicyEngine` (each breach → ESCALATE; all-pass → ACT);
+  `CashCalendarService` (urgency scales with need flags / out-amounts);
+  `Orchestrator` with `StubLLM` + `SimulatedChannel` (full loop, both branches);
+  `MemoryService` round-trip; repositories against a test Postgres.
+- **Integration (marked, opt-in):** one real `claude-opus-4-8` call each for
+  Conversation (tone scales with overdue-ness) and Negotiation (returns a
+  schema-valid plan within policy bounds).
+- `docker-compose` brings up Postgres+pgvector for the DB-touching tests. The
+  `Tracer` defaults to `NullTracer` in tests.
+
+## Open questions
+
+None blocking. Resolved during brainstorming: datastore (Postgres+pgvector),
+LLM (real Claude), location (`backend/`), sequencing (vertical slice).
