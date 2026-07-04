@@ -65,4 +65,10 @@ export const api = {
   // M2: Scheduler
   scheduleStatus: () => req("/schedule/status"),
   scheduleTrigger: () => req("/schedule/trigger", { method: "POST" }),
+
+  // M5: Realtime HITL — escalations pushed live; resolve over the socket.
+  escalationsSocket: () => {
+    const httpBase = BASE || window.location.origin;
+    return new WebSocket(httpBase.replace(/^http/, "ws") + "/ws/escalations");
+  },
 };

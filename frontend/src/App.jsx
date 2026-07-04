@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence } from "framer-motion";
 import { WifiOff } from "lucide-react";
 import Sidebar from "./components/Sidebar.jsx";
@@ -26,6 +26,37 @@ export default function App() {
   const [ingestJobs, setIngestJobs] = useState([]);
   const [queue, setQueue] = useState({ size: 0, items: [] });
   const [AVU, setAVU] = useState({ status: "unknown", queue_size: 0 });
+
+  // M5 state: live HITL over WebSocket
+  const [socket, setSocket] = useState(null);
+  const [liveEscalations, setLiveEscalations] = useState([]);
+  const cycleRef = useRef(null);
+  useEffect(() => { cycleRef.current = cycle; }, [cycle]);
+
+  useEffect(() => {
+    let ws;
+    try {
+      ws = api.escalationsSocket();
+    } catch {
+      return undefined; // REST fallback stays in place
+    }
+    ws.onopen = () => setSocket(ws);
+    ws.onclose = () => setSocket(null);
+    ws.onmessage = (ev) => {
+      const msg = JSON.parse(ev.data);
+      if (msg.type === "escalation") {
+        setLiveEscalations((prev) => [msg, ...prev.filter((e) => e.escalation_id !== msg.escalation_id)]);
+      } else if (msg.type === "resolution") {
+        if (cycleRef.current?.escalation_id === msg.escalation_id) {
+          setResolution({ resolved: true, resolution: msg.resolution });
+          setResolving(false);
+        }
+      } else if (msg.type === "escalation_resolved") {
+        setLiveEscalations((prev) => prev.filter((e) => e.escalation_id !== msg.escalation_id));
+      }
+    };
+    return () => ws.close();
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -68,14 +99,20 @@ export default function App() {
 
   async function resolve(action) {
     setResolving(true);
+    const text = action === "edit" ? cycle.draft : null;
     try {
       if (!cycle.escalation_id || cycle.escalation_id === "demo-escalation") throw new Error("demo");
-      const out = await api.resolve(cycle.escalation_id, action, action === "edit" ? cycle.draft : null);
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        // M5: resolve over the socket; the "resolution" push completes the flow.
+        socket.send(JSON.stringify({ action, escalation_id: cycle.escalation_id, text }));
+        return;
+      }
+      const out = await api.resolve(cycle.escalation_id, action, text);
       setResolution(out);
+      setResolving(false);
     } catch {
       const map = { approve: "approved", edit: "edited", override: "overridden" };
       setResolution({ resolved: true, resolution: map[action] || action });
-    } finally {
       setResolving(false);
     }
   }
@@ -203,6 +240,15 @@ export default function App() {
       {offline && (
         <div style={{ position: "fixed", bottom: 16, left: "50%", transform: "translateX(-50%)", zIndex: 30 }}>
           <span className="offline"><WifiOff size={13} /> Demo data · live API unreachable</span>
+        </div>
+      )}
+
+      {liveEscalations.length > 0 && screen !== "escalation" && (
+        <div style={{ position: "fixed", bottom: 16, right: 16, zIndex: 30 }}>
+          <span className="offline" style={{ background: "var(--azure-600)", color: "#fff" }}>
+            ⚡ Live escalation · {liveEscalations[0].buyer_name} · {liveEscalations[0].amount}
+            {liveEscalations.length > 1 ? ` (+${liveEscalations.length - 1} more)` : ""}
+          </span>
         </div>
       )}
 
