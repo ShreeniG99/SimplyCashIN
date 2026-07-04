@@ -7,7 +7,7 @@ from app.agents.context import ContextAgent
 from app.agents.conversation import ConversationAgent
 from app.agents.negotiation import NegotiationAgent
 from app.agents.orchestrator import Orchestrator
-from app.channels.simulated import SimulatedChannel
+from app.channels.factory import get_channel
 from app.config import settings
 from app.db.repositories import CashEventRepo
 from app.db.session import get_session
@@ -61,7 +61,7 @@ async def get_orchestrator(
         cash_service=CashCalendarService(),
         policy_engine=PolicyEngine(),
         memory=MemoryService(session, store),
-        channel=SimulatedChannel(),
+        channel=get_channel(),
         tracer=default_tracer(),
         cash_events=cash_events,
         today=dt.date(2026, 5, 18),

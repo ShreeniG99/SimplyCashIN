@@ -137,14 +137,14 @@ async def toggle_cash_event(event_id: str, session: AsyncSession = Depends(get_s
 @router.post("/escalations/{esc_id}/resolve")
 async def resolve_escalation(esc_id: str, body: schemas.ResolveIn,
                              session: AsyncSession = Depends(get_session)):
-    from app.channels.simulated import SimulatedChannel
+    from app.channels.factory import get_channel
     repo = EscalationRepo(session)
     try:
         row = await repo.get(esc_id)
     except Exception:
         raise HTTPException(status_code=404, detail="escalation not found")
 
-    channel = SimulatedChannel()
+    channel = get_channel()
     sent_text: str | None = None
     if body.action == "approve" and row.draft_text:
         channel.send(buyer_id=row.buyer_id, message=row.draft_text,
