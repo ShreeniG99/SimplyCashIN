@@ -2,6 +2,8 @@ import json
 from typing import Protocol
 
 import redis
+from redis.backoff import ExponentialBackoff
+from redis.retry import Retry
 
 from app.config import settings
 
@@ -26,8 +28,18 @@ class RedisUrgencyQueue:
     KEY = "scin:urgency:{owner_id}"
 
     def __init__(self, client: redis.Redis | None = None) -> None:
+        # Bounded timeouts + retry with backoff: a wedged connection must not
+        # hang a request, and transient blips must not fail a daily run.
+        # Idempotency note: members are keyed by (buyer, invoice, due_date),
+        # so zadd makes re-running the trigger a no-op, not a duplicate.
         self._r = client or redis.from_url(
-            settings.redis_url or "redis://localhost:6379/0", decode_responses=True
+            settings.redis_url or "redis://localhost:6379/0",
+            decode_responses=True,
+            socket_timeout=5,
+            socket_connect_timeout=5,
+            retry=Retry(ExponentialBackoff(cap=2, base=0.1), retries=3),
+            retry_on_error=[redis.exceptions.ConnectionError,
+                            redis.exceptions.TimeoutError],
         )
 
     def _key(self, owner_id: str = "default") -> str:
