@@ -1,6 +1,6 @@
 import datetime as dt
 
-from fastapi import Depends
+from fastapi import Depends, Header, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.context import ContextAgent
@@ -20,7 +20,34 @@ from app.services.cash_calendar import CashCalendarService
 from app.services.memory import MemoryService
 from app.services.policy import PolicyEngine
 
-OWNER_ID = "ramesh"
+DEV_OWNER_ID = "ramesh"
+
+
+def owner_from_token(token: str | None) -> str:
+    """Resolve owner identity from a Supabase-issued HS256 JWT (`sub` claim).
+    With SUPABASE_JWT_SECRET unset (dev/tests/demo), everything resolves to
+    the seeded owner so M1–M3 flows run unchanged."""
+    if not settings.supabase_jwt_secret:
+        return DEV_OWNER_ID
+    if not token:
+        raise HTTPException(status_code=401, detail="missing bearer token")
+    import jwt
+    try:
+        payload = jwt.decode(token, settings.supabase_jwt_secret,
+                             algorithms=["HS256"], options={"verify_aud": False})
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="invalid token")
+    owner_id = payload.get("sub")
+    if not owner_id:
+        raise HTTPException(status_code=401, detail="token missing sub claim")
+    return owner_id
+
+
+async def get_owner_id(authorization: str | None = Header(default=None)) -> str:
+    token = None
+    if authorization and authorization.lower().startswith("bearer "):
+        token = authorization.split(" ", 1)[1]
+    return owner_from_token(token)
 
 
 def get_llm() -> LLM:
@@ -51,9 +78,10 @@ def get_llm() -> LLM:
 async def get_orchestrator(
     session: AsyncSession = Depends(get_session),
     llm: LLM = Depends(get_llm),
+    owner_id: str = Depends(get_owner_id),
 ) -> Orchestrator:
-    store = PgVectorStore(session, StubEmbedder())
-    cash_events = await CashEventRepo(session).for_owner(OWNER_ID)
+    store = PgVectorStore(session, StubEmbedder(), owner_id=owner_id)
+    cash_events = await CashEventRepo(session).for_owner(owner_id)
     return Orchestrator(
         context_agent=ContextAgent(store),
         conversation_agent=ConversationAgent(llm),

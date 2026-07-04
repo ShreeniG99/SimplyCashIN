@@ -89,6 +89,10 @@ class MemoryEmbeddingRow(Base):
     __tablename__ = "memory_embedding"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     buyer_id: Mapped[str] = mapped_column(ForeignKey("buyer.id", deferrable=True, initially="DEFERRED"))
+    # M4 tenancy namespace; nullable so pre-M4 writers keep working, always
+    # stamped by PgVectorStore when constructed with an owner.
+    owner_id: Mapped[str | None] = mapped_column(
+        ForeignKey("owner.id", deferrable=True, initially="DEFERRED"), nullable=True)
     snippet: Mapped[str] = mapped_column(Text)
     embedding: Mapped[list[float]] = mapped_column(Vector(EMBED_DIM))
 

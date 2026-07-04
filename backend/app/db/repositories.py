@@ -1,4 +1,5 @@
 import datetime as dt
+import uuid
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -83,6 +84,15 @@ class ConversationRepo:
                                  agent=r.agent, text=r.text, created_at=r.created_at)
                 for r in rows]
 
+    async def add_turn(self, *, buyer_id: str, sender: str, text: str,
+                       agent: str | None = None) -> ConversationTurn:
+        row = m.ConversationTurnRow(
+            id=str(uuid.uuid4()), buyer_id=buyer_id, sender=sender, agent=agent,
+            text=text, created_at=dt.datetime.now(dt.UTC).replace(tzinfo=None))
+        self.s.add(row)
+        return ConversationTurn(id=row.id, buyer_id=row.buyer_id, sender=row.sender,
+                                agent=row.agent, text=row.text, created_at=row.created_at)
+
 
 class CashEventRepo:
     def __init__(self, session: AsyncSession):
@@ -94,9 +104,11 @@ class CashEventRepo:
             .order_by(m.CashEventRow.due_date))).scalars().all()
         return [self._to_domain(r) for r in rows]
 
-    async def toggle(self, event_id: str) -> CashEvent:
-        row = (await self.s.execute(
-            select(m.CashEventRow).where(m.CashEventRow.id == event_id))).scalar_one()
+    async def toggle(self, event_id: str, owner_id: str | None = None) -> CashEvent:
+        stmt = select(m.CashEventRow).where(m.CashEventRow.id == event_id)
+        if owner_id is not None:
+            stmt = stmt.where(m.CashEventRow.owner_id == owner_id)
+        row = (await self.s.execute(stmt)).scalar_one()
         row.status = (CashEventStatus.DONE.value
                       if row.status == CashEventStatus.PENDING.value
                       else CashEventStatus.PENDING.value)
