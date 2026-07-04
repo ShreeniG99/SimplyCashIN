@@ -101,11 +101,12 @@ class EscalationRepo:
         self.s = session
 
     async def save(self, esc: Escalation, *, draft_text: str | None,
-                   channel_kind: str | None) -> None:
+                   channel_kind: str | None, draft_tone: str | None = None) -> None:
         self.s.add(m.EscalationRow(
             id=esc.id, buyer_id=esc.buyer_id, amount_paise=esc.amount_paise,
             reason=esc.reason, recommendation=esc.recommendation,
-            draft_text=draft_text, channel_kind=channel_kind, resolved=False))
+            draft_text=draft_text, draft_tone=draft_tone,
+            channel_kind=channel_kind, resolved=False))
 
     async def get(self, esc_id: str) -> m.EscalationRow:
         return (await self.s.execute(

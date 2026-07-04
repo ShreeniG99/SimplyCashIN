@@ -70,6 +70,7 @@ class EscalationRow(Base):
     reason: Mapped[str] = mapped_column(Text)
     recommendation: Mapped[str] = mapped_column(Text)
     draft_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    draft_tone: Mapped[str | None] = mapped_column(String, nullable=True)
     channel_kind: Mapped[str | None] = mapped_column(String, nullable=True)
     resolved: Mapped[bool] = mapped_column(Boolean, default=False)
     resolution: Mapped[str | None] = mapped_column(String, nullable=True)

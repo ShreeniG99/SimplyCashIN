@@ -76,6 +76,7 @@ async def run_cycle(buyer_id: str, session: AsyncSession = Depends(get_session),
         await EscalationRepo(session).save(
             result.escalation,
             draft_text=result.draft.text if result.draft else None,
+            draft_tone=result.draft.tone.value if result.draft else None,
             channel_kind=buyer.preferred_channel)
         await session.commit()
 
@@ -144,18 +145,34 @@ async def resolve_escalation(esc_id: str, body: schemas.ResolveIn,
         raise HTTPException(status_code=404, detail="escalation not found")
 
     channel = SimulatedChannel()
+    sent_text: str | None = None
     if body.action == "approve" and row.draft_text:
         channel.send(buyer_id=row.buyer_id, message=row.draft_text,
                      channel_kind=row.channel_kind or "WhatsApp Business")
         resolution = "approved"
+        sent_text = row.draft_text
     elif body.action == "edit" and body.text:
         channel.send(buyer_id=row.buyer_id, message=body.text,
                      channel_kind=row.channel_kind or "WhatsApp Business")
         resolution = "edited"
+        sent_text = body.text
     elif body.action == "override":
         resolution = "overridden"
     else:
         raise HTTPException(status_code=400, detail="invalid action or missing text")
+
+    if sent_text is not None:
+        # Spec: on approve -> dispatch + memory. Record the owner-approved
+        # send exactly like an ACT-path send.
+        from app.domain.enums import Tone
+        from app.retrieval.embedder import StubEmbedder
+        from app.retrieval.vector_store import PgVectorStore
+        from app.services.memory import MemoryService
+        memory = MemoryService(session, PgVectorStore(session, StubEmbedder()))
+        await memory.record_outcome(
+            buyer_id=row.buyer_id,
+            tone=Tone(row.draft_tone) if row.draft_tone else Tone.GENTLE,
+            plan=None, timing="after owner approval", paid=False)
 
     await repo.resolve(esc_id, resolution)
     return {"id": esc_id, "resolved": True, "resolution": resolution}

@@ -36,3 +36,29 @@ async def test_escalation_persisted_and_resolved(session):
                                  json={"action": "approve"})).json()
         assert out["resolved"] is True
         assert out["resolution"] == "approved"
+
+        # Spec: on approve -> dispatch + memory. The approved send must land
+        # in the memory layer like any ACT-path send.
+        from sqlalchemy import func, select
+        from app.db.models import MemoryRecordRow
+        n_mem = (await session.execute(
+            select(func.count()).select_from(MemoryRecordRow)
+            .where(MemoryRecordRow.buyer_id == "anand"))).scalar_one()
+        assert n_mem >= 1
+
+
+@pytest.mark.db
+async def test_override_records_owner_choice(session):
+    await seed(session)
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: session
+    app.dependency_overrides[get_llm] = lambda: _bad_plan_stub()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        res = (await client.post("/buyers/anand/run-cycle")).json()
+        eid = res["escalation_id"]
+        out = (await client.post(f"/escalations/{eid}/resolve",
+                                 json={"action": "override"})).json()
+        assert out["resolved"] is True
+        assert out["resolution"] == "overridden"
