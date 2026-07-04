@@ -3,6 +3,7 @@ import uuid
 
 from sqlalchemy import select
 
+from app.config import settings
 from app.db import models as m
 from app.db.repositories import CashEventRepo
 from app.domain.enums import InvoiceStatus
@@ -49,12 +50,21 @@ class DailyOverdueTrigger:
                 )
                 processed += 1
 
+        # Split of responsibilities (M3 decision): APScheduler DETECTS overdue
+        # and enqueues; Celery DISPATCHES. Hand-off happens here, exactly once.
+        dispatched_via = "queue_only"
+        if processed and settings.enable_celery_dispatch:
+            from app.dispatch.tasks import drain_queue
+            drain_queue.delay(owner_id)
+            dispatched_via = "celery"
+
         return {
             "run_id": run_id,
             "owner_id": owner_id,
             "date": today.isoformat(),
             "processed": processed,
             "urgency_score": urgency.score,
+            "dispatched_via": dispatched_via,
         }
 
 
