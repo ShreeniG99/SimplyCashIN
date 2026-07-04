@@ -47,13 +47,28 @@ class InvoiceRepo:
     def __init__(self, session: AsyncSession):
         self.s = session
 
-    async def latest_for_buyer(self, buyer_id: str) -> Invoice:
+    async def get(self, invoice_id: str, today: dt.date | None = None) -> Invoice:
+        row = (await self.s.execute(
+            select(m.InvoiceRow).where(m.InvoiceRow.id == invoice_id))).scalar_one()
+        return self._to_domain(row, today)
+
+    async def latest_for_buyer(self, buyer_id: str, today: dt.date | None = None) -> Invoice:
         row = (await self.s.execute(
             select(m.InvoiceRow).where(m.InvoiceRow.buyer_id == buyer_id)
             .order_by(m.InvoiceRow.due_date.desc()))).scalars().first()
+        return self._to_domain(row, today)
+
+    @staticmethod
+    def _to_domain(row: m.InvoiceRow, today: dt.date | None) -> Invoice:
+        # days_overdue is derived at read time so it never goes stale;
+        # the stored column remains only as ingest-time metadata.
+        today = today or dt.date.today()
+        status = InvoiceStatus(row.status)
+        days_overdue = (0 if status is InvoiceStatus.PAID
+                        else max(0, (today - row.due_date).days))
         return Invoice(id=row.id, buyer_id=row.buyer_id, number=row.number,
                        amount_paise=row.amount_paise, due_date=row.due_date,
-                       status=InvoiceStatus(row.status), days_overdue=row.days_overdue)
+                       status=status, days_overdue=days_overdue)
 
 
 class ConversationRepo:

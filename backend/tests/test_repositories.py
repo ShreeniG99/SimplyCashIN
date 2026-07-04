@@ -27,3 +27,28 @@ async def test_buyer_and_invoice_lookup(session):
     inv = await InvoiceRepo(session).latest_for_buyer("anand")
     assert inv.number == "INV-2291"
     assert inv.amount_paise == 240000_00
+
+
+@pytest.mark.db
+async def test_days_overdue_is_derived_at_read(session):
+    session.add(OwnerRow(id="ramesh", name="Ramesh", business="SVM",
+                         max_extension_days=30, min_upfront_pct=30))
+    session.add(BuyerRow(id="anand", owner_id="ramesh", name="Anand Motors",
+                         tier="Regular · 3 yrs", relationship_years=3.0,
+                         on_time_rate=0.82, preferred_channel="WhatsApp Business"))
+    # Stored days_overdue is stale (0); due 14 days before `today`
+    session.add(InvoiceRow(id="inv1", buyer_id="anand", number="INV-2291",
+                           amount_paise=240000_00, due_date=dt.date(2026, 5, 4),
+                           status="overdue", days_overdue=0))
+    # Paid invoices are never overdue regardless of dates
+    session.add(InvoiceRow(id="inv0", buyer_id="anand", number="INV-2200",
+                           amount_paise=10000_00, due_date=dt.date(2026, 1, 1),
+                           status="paid", days_overdue=99))
+    await session.commit()
+
+    today = dt.date(2026, 5, 18)
+    inv = await InvoiceRepo(session).latest_for_buyer("anand", today=today)
+    assert inv.days_overdue == 14          # derived from due_date, not the stale column
+
+    paid = await InvoiceRepo(session).get("inv0", today=today)
+    assert paid.days_overdue == 0

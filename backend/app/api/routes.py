@@ -22,7 +22,7 @@ async def list_buyers(session: AsyncSession = Depends(get_session)):
     buyers = await BuyerRepo(session).list_for_owner(OWNER_ID)
     out = []
     for b in buyers:
-        inv = await InvoiceRepo(session).latest_for_buyer(b.id)
+        inv = await InvoiceRepo(session).latest_for_buyer(b.id, today=TODAY)
         action = {"overdue": "Needs follow-up", "due": "Reminder scheduled",
                   "paid": "Paid in full"}[inv.status.value]
         out.append(schemas.BuyerOut(
@@ -40,7 +40,7 @@ async def buyer_detail(buyer_id: str, session: AsyncSession = Depends(get_sessio
         buyer = await BuyerRepo(session).get(buyer_id)
     except Exception:
         raise HTTPException(status_code=404, detail="buyer not found")
-    invoice = await InvoiceRepo(session).latest_for_buyer(buyer_id)
+    invoice = await InvoiceRepo(session).latest_for_buyer(buyer_id, today=TODAY)
     thread = await ConversationRepo(session).thread_for_buyer(buyer_id)
     snippets = await PgVectorStore(session, StubEmbedder()).search(
         buyer_id, "what worked best", k=1)
@@ -66,7 +66,7 @@ async def run_cycle(buyer_id: str, session: AsyncSession = Depends(get_session),
     except Exception:
         raise HTTPException(status_code=404, detail="buyer not found")
     owner = await OwnerRepo(session).get(OWNER_ID)
-    invoice = await InvoiceRepo(session).latest_for_buyer(buyer_id)
+    invoice = await InvoiceRepo(session).latest_for_buyer(buyer_id, today=TODAY)
     thread = await ConversationRepo(session).thread_for_buyer(buyer_id)
 
     result = await orchestrator.run_cycle(owner, buyer, invoice, thread)
