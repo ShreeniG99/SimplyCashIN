@@ -9,6 +9,9 @@ from app.domain.enums import InvoiceStatus
 from app.queue.redis_queue import RedisUrgencyQueue
 from app.services.cash_calendar import CashCalendarService
 
+DAILY_JOB_ID = "daily-overdue-trigger"
+DAILY_HOUR = 8  # owner-local morning run
+
 
 class DailyOverdueTrigger:
     """APScheduler job that runs daily, finds overdue invoices,
@@ -53,3 +56,19 @@ class DailyOverdueTrigger:
             "processed": processed,
             "urgency_score": urgency.score,
         }
+
+
+def build_scheduler(session_factory, hour: int = DAILY_HOUR):
+    """AsyncIOScheduler with the daily overdue trigger registered (not started).
+
+    The API lifespan starts it when ENABLE_SCHEDULER=1; kept opt-in because
+    the serverless deployment (api/index.py) must not run an in-process cron.
+    """
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    from apscheduler.triggers.cron import CronTrigger
+
+    trigger = DailyOverdueTrigger(session_factory)
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(trigger.run, CronTrigger(hour=hour, minute=0),
+                      id=DAILY_JOB_ID, replace_existing=True)
+    return scheduler

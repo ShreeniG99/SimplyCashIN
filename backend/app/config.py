@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     posthog_api_key: str = ""
     posthog_host: str = "https://us.i.posthog.com"
     redis_url: str = "redis://localhost:6379/0"
+    enable_scheduler: bool = False
 
 
 settings = Settings()
