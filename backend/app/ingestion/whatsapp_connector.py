@@ -10,8 +10,9 @@ class WhatsAppConnector:
     """Parses exported WhatsApp chat .txt files.
     Extracts buyer name from contact and payment mentions."""
 
-    # Must have ₹ or Rs prefix; avoids matching phone numbers
-    _AMOUNT_RE = re.compile(r"(?:^|[^\d])[₹Rs]\.?\s*([\d,]+(?:,\d{3})*)", re.IGNORECASE)
+    # Requires an explicit currency marker (₹, Rs, Rs., INR) so bare numbers,
+    # phone numbers, and words ending in r/s never read as amounts.
+    _AMOUNT_RE = re.compile(r"(?:₹|\brs\.?|\binr\b)\s*([\d][\d,]*)", re.IGNORECASE)
     _DATE_RE = re.compile(r"(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})")
 
     def parse(self, raw: bytes, owner_id: str) -> list[tuple[Buyer, Invoice]]:
