@@ -28,6 +28,9 @@ def upgrade() -> None:
     op.execute(
         "UPDATE memory_embedding SET owner_id = buyer.owner_id "
         "FROM buyer WHERE memory_embedding.buyer_id = buyer.id")
+    # The deferred FK triggers queued by the backfill must fire before
+    # ALTER TABLE (ObjectInUseError: "pending trigger events" otherwise).
+    op.execute("SET CONSTRAINTS ALL IMMEDIATE")
 
     for table in _RLS_TABLES:
         op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
