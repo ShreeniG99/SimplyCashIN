@@ -118,3 +118,22 @@ async def test_llm_failure_escalates():
                                   thread=[_turn("buyer", "can I pay over a few weeks?")])
     assert result.decision is Decision.ESCALATE
     assert "could not complete" in result.escalation.reason.lower()
+
+
+class FailingChannel:
+    """Channel whose dispatch always fails (spec: send failure -> escalate)."""
+
+    def send(self, *, buyer_id, message, channel_kind):
+        from app.channels.base import DispatchResult
+        return DispatchResult(ok=False, detail="network down")
+
+
+async def test_channel_send_failure_escalates_and_skips_memory():
+    mem = FakeMemory()
+    orch = _orchestrator(_good_plan_llm(), cash_events=[], memory=mem)
+    orch.channel = FailingChannel()
+    result = await orch.run_cycle(OWNER, BUYER, INV,
+                                  thread=[_turn("buyer", "can I pay over a few weeks?")])
+    assert result.decision is Decision.ESCALATE
+    assert "send failed" in result.escalation.reason.lower()
+    assert mem.records == []          # no outcome recorded for a failed send

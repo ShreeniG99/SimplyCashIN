@@ -74,8 +74,14 @@ class Orchestrator:
         decision = Decision.ACT if all(c.ok for c in checks) else Decision.ESCALATE
 
         if decision is Decision.ACT:
-            self.channel.send(buyer_id=buyer.id, message=draft.text,
-                              channel_kind=buyer.preferred_channel)
+            dispatch = self.channel.send(buyer_id=buyer.id, message=draft.text,
+                                         channel_kind=buyer.preferred_channel)
+            if not dispatch.ok:
+                return self._escalate(
+                    owner, buyer, invoice, context, urgency, draft=draft, plan=plan,
+                    checks=checks,
+                    reason=f"Send failed via {buyer.preferred_channel}: {dispatch.detail}",
+                    recommendation="Retry the send or reach the buyer another way.")
             await self.memory.record_outcome(
                 buyer_id=buyer.id, tone=draft.tone, plan=plan,
                 timing=f"day {invoice.days_overdue}", paid=False)
