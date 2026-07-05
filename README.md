@@ -1,5 +1,7 @@
 # SimplyCashIN
 
+[![CI](https://github.com/ShreeniG99/SimplyCashIN/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ShreeniG99/SimplyCashIN/actions/workflows/ci.yml)
+
 **Agentic receivables collection for Indian MSMEs.** An AI agent that chases overdue invoices over WhatsApp/SMS/email, negotiates payment plans inside owner-defined guardrails, and hands control to a human the moment judgment is required — live, over a WebSocket.
 
 > 🎬 **2-minute demo video:** _coming soon — link will be added here_
