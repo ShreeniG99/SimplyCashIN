@@ -1,0 +1,4 @@
+buyer_name,buyer_tier,relationship_years,on_time_rate,preferred_channel,invoice_number,amount_rupees,due_date,status
+Ganesh Traders,Regular · 2 yrs,2.0,0.74,WhatsApp Business,INV-2312,72000,2026-05-06,overdue
+Sunrise Auto Parts,New · 4 mo,0.3,0.55,SMS,INV-2315,48000,2026-05-10,overdue
+Vel Murugan Motors,Premium · 7 yrs,7.0,0.93,Email,INV-2318,150000,2026-05-14,overdue

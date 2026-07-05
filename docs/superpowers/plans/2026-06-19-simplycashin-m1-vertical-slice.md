@@ -1,5 +1,7 @@
 # SimplyCashIN M1 Vertical Slice — Implementation Plan
 
+> **STATUS: ✅ SHIPPED.** Every task below is implemented, tested, and merged (the checkboxes were used for in-session tracking and left unticked). M2–M5 followed on top of this slice — see the repo root README for the full feature list.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a runnable, end-to-end collections decision loop for one overdue invoice — Context → Conversation → Negotiation → Orchestrator (ACT/ESCALATE) → simulated dispatch → Memory — behind a thin FastAPI surface, backed by Postgres+pgvector.
