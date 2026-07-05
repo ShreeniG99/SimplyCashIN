@@ -186,7 +186,9 @@ export default function App() {
   }
 
   function navigate(id) {
-    setScreen(id);
+    // Nav items without a dedicated screen land where their content lives.
+    const screenFor = { calendar: "dashboard", policy: "dashboard" };
+    setScreen(screenFor[id] || id);
     if (id !== "conversation" && id !== "escalation") {
       setDetail(null); setCycle(null); setResolution(null);
     }
@@ -217,7 +219,7 @@ export default function App() {
           onPopQueue={handlePopQueue}
         />
       )}
-      {screen === "buyers" && (
+      {(screen === "buyers" || screen === "inbox") && (
         <Buyers
           buyers={data.buyers}
           ingestJobs={ingestJobs}
