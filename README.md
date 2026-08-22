@@ -47,6 +47,7 @@ flowchart LR
 | M3 | APScheduler detection + Celery dispatch, Twilio WhatsApp/SMS + SMTP email channels, inbound reply webhook | ✅ |
 | M4 | Supabase JWT auth, multi-tenancy with Postgres RLS | ✅ |
 | M5 | Realtime HITL WebSocket gateway, wired to the React escalation screen | ✅ |
+| M6 | AI Finance Controller: multi-source reconciliation agent (bank ↔ ledger), measured match rate + honest exceptions | ✅ |
 
 **Stack:** Python 3.12 · FastAPI · SQLAlchemy 2 (async) + asyncpg · Alembic · Postgres + pgvector · Redis · Celery · APScheduler · Anthropic SDK · Pydantic v2 · pytest — React 18 · Vite · Framer Motion on the front.
 
@@ -126,3 +127,61 @@ python -m pytest          # db tests auto-skip if Postgres is down
 ```
 
 Operational detail — the scheduler/Celery split, channel credentials, auth setup, and the full demo script — lives in [backend/README.md](backend/README.md).
+
+## AI Finance Controller (M6): reconciliation agent
+
+A second, self-contained decision loop built on the same LLM seam and
+"deterministic-first, LLM-only-where-it-must-reason" philosophy as the
+collections agent above — closing a different finance-ops loop: matching a
+bank statement against the internal ledger, at throughput, with a measured
+accuracy and an honest list of what it couldn't resolve.
+
+```mermaid
+flowchart LR
+    A[Synthetic batch\nbank + ledger] --> B[ReconciliationEngine\npure Python, tiered rules]
+    B -- unique match --> F[MatchedPair]
+    B -- >1 candidate --> C[ReconciliationAgent\nClaude adjudicates]
+    C -- confident --> F
+    C -- declines / unsure --> E[Exception\ntyped reason, never dropped]
+    B -- zero candidates --> E
+    F --> G[ReconciliationReport\nmatch rate + throughput + exceptions]
+    E --> G
+```
+
+- **Rules first, LLM only for genuine ambiguity.** `ReconciliationEngine`
+  (`backend/app/services/reconciliation.py`) runs four tiers — exact
+  reference, exact amount+date, amount+date window, then fuzzy
+  (amount tolerance + date window + counterparty-or-description match) —
+  and only ever claims a match when exactly one candidate qualifies at a
+  tier. A bank record with more than one plausible ledger candidate is
+  never guessed at; it's handed to `ReconciliationAgent`
+  (`backend/app/agents/reconciliation.py`), which sits behind the same
+  `LLM` seam as the rest of the app (`StubLLM` offline, `AnthropicClient`
+  in prod) and is instructed to return "no match" rather than force one.
+- **Every unresolved record is a typed exception, never a silent drop.**
+  `ReconciliationController` accounts for every input record: matched, or
+  an exception with one of `no_candidate`, `ambiguous_candidates`,
+  `agent_rejected`, `agent_uncertain` — `test_reconciliation_e2e.py`
+  asserts the report is exhaustive.
+- **Measured, not cherry-picked.** `scripts/run_reconciliation.py` runs a
+  seeded 40-transaction synthetic batch (`app/data/synthetic_reconciliation.py`,
+  ~80 combined bank+ledger records covering clean matches, settlement lag,
+  rounding drift, orphans on both sides, and genuinely ambiguous
+  duplicate-invoice pairs) and prints throughput, match rate on both sides,
+  and the full exception list — deterministic given `--seed`, so the numbers
+  reproduce:
+
+  ```powershell
+  cd backend
+  $env:USE_STUB_LLM = "1"       # or set ANTHROPIC_API_KEY and USE_STUB_LLM=0 for live adjudication
+  python scripts\run_reconciliation.py
+  ```
+
+  A representative offline run (`--seed 42`, rules only — `StubLLM`
+  declining every ambiguous case so nothing is guessed): **81 combined
+  records (37 bank + 44 ledger), 78.4% of bank records / 65.9% of ledger
+  records matched, tens of thousands of records/sec** on the deterministic
+  tiers, with every remaining record listed as a typed exception. Pointing
+  it at a real `ANTHROPIC_API_KEY` resolves a further slice of the
+  ambiguous cases and raises the match rate — see
+  `tests/test_reconciliation_e2e.py::test_agent_adjudication_resolves_some_ambiguous_cases_and_raises_match_rate`.

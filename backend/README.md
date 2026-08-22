@@ -76,6 +76,32 @@ connected and falls back to REST.
     # 5. inbound buyer reply lands in the thread
     curl -X POST "http://localhost:8123/webhooks/twilio?buyer_id=anand" -d "Body=Will pay Friday"
 
+## AI Finance Controller / reconciliation (M6)
+
+A second, independent decision loop — no Postgres, Redis, or channels
+needed, just the `LLM` seam:
+
+    USE_STUB_LLM=1 python scripts/run_reconciliation.py            # rules-only, offline
+    ANTHROPIC_API_KEY=... USE_STUB_LLM=0 python scripts/run_reconciliation.py  # live adjudication
+    python scripts/run_reconciliation.py --seed 7 --n 60 --out reports/run7.json
+
+`ReconciliationEngine` (deterministic, tiered) does as much as rules safely
+can; `ReconciliationAgent` (LLM-backed) adjudicates only the bank records
+with more than one plausible ledger candidate, and declines rather than
+guesses when it isn't confident. `ReconciliationController` wires the two
+together and produces a `ReconciliationReport` that accounts for every
+input record — matched, or a typed exception
+(`no_candidate` / `ambiguous_candidates` / `agent_rejected` /
+`agent_uncertain`). The synthetic batch
+(`app/data/synthetic_reconciliation.py`) is seeded, so a given `--seed`
+always reproduces the same records and the same match rate.
+
+Tests: `pytest tests/test_reconciliation_engine.py tests/test_reconciliation_agent.py
+tests/test_reconciliation_e2e.py` — engine tiers in isolation, the agent's
+accept/reject/low-confidence/error paths via `StubLLM`, and an end-to-end
+run over the full batch asserting the report is reproducible and exhaustive
+(every unmatched record shows up as an exception, never silently dropped).
+
 ## Auth & multi-tenancy (M4)
 
 `SUPABASE_JWT_SECRET` set → every request must carry a Supabase-issued HS256
